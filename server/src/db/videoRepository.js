@@ -95,7 +95,7 @@ export function upsertVideos(items) {
   transaction(items);
 }
 
-export function getVideos({ offset = 0, limit = DEFAULT_PAGE_SIZE, search = '', filter = 'active' }) {
+export function getVideos({ offset = 0, limit = DEFAULT_PAGE_SIZE, search = '', filter = 'active', folder = 'all' }) {
   const where = [];
   const params = {};
 
@@ -109,6 +109,15 @@ export function getVideos({ offset = 0, limit = DEFAULT_PAGE_SIZE, search = '', 
   if (search) {
     where.push('(base_name LIKE @search OR filename LIKE @search)');
     params.search = `%${search}%`;
+  }
+
+  if (folder && folder !== 'all') {
+    if (folder === '__root__') {
+      where.push("(subdirectory IS NULL OR subdirectory = '')");
+    } else {
+      where.push('subdirectory = @folder');
+      params.folder = folder;
+    }
   }
 
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -132,8 +141,10 @@ export function getVideos({ offset = 0, limit = DEFAULT_PAGE_SIZE, search = '', 
   };
 }
 
-export function getFilterQueue(scope = 'pending') {
+export function getFilterQueue(scope = 'pending', folder = 'all') {
   let query = "SELECT * FROM videos WHERE decision = 'pending'";
+  const where = [];
+  const params = {};
 
   if (scope === 'active') {
     query = "SELECT * FROM videos WHERE decision != 'trashed'";
@@ -141,8 +152,83 @@ export function getFilterQueue(scope = 'pending') {
     query = "SELECT * FROM videos WHERE decision = 'kept'";
   }
 
-  const rows = db.prepare(`${query} ORDER BY base_name COLLATE NOCASE ASC`).all();
+  if (folder && folder !== 'all') {
+    if (folder === '__root__') {
+      where.push("(subdirectory IS NULL OR subdirectory = '')");
+    } else {
+      where.push('subdirectory = @folder');
+      params.folder = folder;
+    }
+  }
+
+  const whereClause = where.length ? ` AND ${where.join(' AND ')}` : '';
+
+  const rows = db.prepare(`${query}${whereClause} ORDER BY base_name COLLATE NOCASE ASC`).all(params);
   return rows.map(mapVideo);
+}
+
+export function getVideoFolderCounts({ filter = 'active', search = '' } = {}) {
+  const where = [];
+  const params = {};
+
+  if (filter === DECISIONS.PENDING || filter === DECISIONS.KEPT || filter === DECISIONS.TRASHED) {
+    where.push('decision = @decision');
+    params.decision = filter;
+  } else if (filter === 'active') {
+    where.push("decision != 'trashed'");
+  }
+
+  if (search) {
+    where.push('(base_name LIKE @search OR filename LIKE @search)');
+    params.search = `%${search}%`;
+  }
+
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const rows = db
+    .prepare(
+      `SELECT COALESCE(NULLIF(subdirectory, ''), '__root__') AS tag, COUNT(*) AS count
+       FROM videos
+       ${clause}
+       GROUP BY tag
+       ORDER BY CASE tag WHEN '__root__' THEN 0 ELSE 1 END, tag COLLATE NOCASE ASC`
+    )
+    .all(params);
+
+  return rows.map((row) => ({ tag: row.tag, count: row.count }));
+}
+
+export function getFilterQueueFolderCounts(scope = 'pending') {
+  let where = "WHERE decision = 'pending'";
+
+  if (scope === 'active') {
+    where = "WHERE decision != 'trashed'";
+  } else if (scope === 'kept') {
+    where = "WHERE decision = 'kept'";
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT COALESCE(NULLIF(subdirectory, ''), '__root__') AS tag, COUNT(*) AS count
+       FROM videos
+       ${where}
+       GROUP BY tag
+       ORDER BY CASE tag WHEN '__root__' THEN 0 ELSE 1 END, tag COLLATE NOCASE ASC`
+    )
+    .all();
+
+  return rows.map((row) => ({ tag: row.tag, count: row.count }));
+}
+
+export function getQueueFolderTags() {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT COALESCE(NULLIF(subdirectory, ''), '__root__') AS tag
+       FROM videos
+       ORDER BY CASE tag WHEN '__root__' THEN 0 ELSE 1 END, tag COLLATE NOCASE ASC`
+    )
+    .all();
+
+  return rows.map((row) => row.tag);
 }
 
 export function getVideoById(id) {

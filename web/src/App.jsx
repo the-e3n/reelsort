@@ -22,14 +22,18 @@ function getUrlState() {
   const params = new URLSearchParams(window.location.search);
   const tab = params.get('tab');
   const libraryFilter = params.get('libFilter');
+  const libraryFolder = params.get('libFolder');
   const queueScope = params.get('queueScope');
+  const queueFolder = params.get('queueFolder');
   const videoId = Number.parseInt(params.get('video') || '', 10);
 
   return {
     tab: VALID_TAB_SET.has(tab) ? tab : 'library',
     libraryFilter: VALID_LIBRARY_FILTER_SET.has(libraryFilter) ? libraryFilter : 'active',
+    libraryFolder: libraryFolder || 'all',
     queueScope: VALID_QUEUE_SCOPE_SET.has(queueScope) ? queueScope : 'pending',
     hasQueueScope: VALID_QUEUE_SCOPE_SET.has(queueScope),
+    queueFolder: queueFolder || 'all',
     currentFilterId: Number.isFinite(videoId) ? videoId : null,
   };
 }
@@ -40,6 +44,13 @@ function formatBytes(bytes) {
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** exponent;
   return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
+
+function toFolderOptions(folderCounts = []) {
+  return folderCounts.map((item) => ({
+    value: item.tag,
+    label: `${item.tag === '__root__' ? 'Root folder' : item.tag} (${item.count})`,
+  }));
 }
 
 function useInfiniteObserver(callback, enabled) {
@@ -182,11 +193,15 @@ function LibraryView({
   onReview,
   filter,
   onFilterChange,
+  folder,
+  onFolderChange,
+  folderOptions,
   search,
   onSearchChange,
   viewMode,
   onViewModeChange,
 }) {
+
   const sentinelRef = useInfiniteObserver(onLoadMore, hasMore && !loading);
 
   return (
@@ -199,6 +214,12 @@ function LibraryView({
           <input value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search filename" />
           <select value={filter} onChange={(event) => onFilterChange(event.target.value)}>
             {FILTER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <select value={folder} onChange={(event) => onFolderChange(event.target.value)}>
+            <option value="all">All folders</option>
+            {folderOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
@@ -242,11 +263,23 @@ function LibraryView({
   );
 }
 
-function FilterView({ queue, currentId, onSelect, onDecision, scope, onScopeChange, skipSeconds, onRefresh }) {
+function FilterView({
+  queue,
+  currentId,
+  onSelect,
+  onDecision,
+  scope,
+  onScopeChange,
+  folder,
+  onFolderChange,
+  folderOptions,
+  skipSeconds,
+  onRefresh,
+}) {
   const videoRef = useRef(null);
   const lastPRef = useRef(0);
   const saveTickRef = useRef(0);
-  const [showQueueCards, setShowQueueCards] = useState(true);
+  const [showQueueCards, setShowQueueCards] = useState(false);
   const current = useMemo(() => queue.find((item) => item.id === currentId) || queue[0] || null, [queue, currentId]);
   const currentIndex = current ? queue.findIndex((item) => item.id === current.id) : -1;
   const previous = currentIndex > 0 ? queue[currentIndex - 1] : null;
@@ -364,6 +397,12 @@ function FilterView({ queue, currentId, onSelect, onDecision, scope, onScopeChan
         <div className="toolbar toolbar--wrap">
           <select value={scope} onChange={(event) => onScopeChange(event.target.value)}>
             {FILTER_SCOPES.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <select value={folder} onChange={(event) => onFolderChange(event.target.value)}>
+            <option value="all">All folders</option>
+            {folderOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
@@ -574,11 +613,15 @@ export default function App() {
   const [nextOffset, setNextOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [libraryFilter, setLibraryFilter] = useState(initialUrlState.libraryFilter);
+  const [libraryFolder, setLibraryFolder] = useState(initialUrlState.libraryFolder);
+  const [libraryFolderOptions, setLibraryFolderOptions] = useState([]);
   const [libraryViewMode, setLibraryViewMode] = useState('list');
   const [search, setSearch] = useState('');
   const [loadingVideos, setLoadingVideos] = useState(false);
   const [queue, setQueue] = useState([]);
   const [queueScope, setQueueScope] = useState(initialUrlState.queueScope);
+  const [queueFolder, setQueueFolder] = useState(initialUrlState.queueFolder);
+  const [queueFolderOptions, setQueueFolderOptions] = useState([]);
   const [currentFilterId, setCurrentFilterId] = useState(initialUrlState.currentFilterId);
   const [trash, setTrash] = useState([]);
   const [scanStatus, setScanStatus] = useState('');
@@ -589,16 +632,32 @@ export default function App() {
     setStats(await api.getStats());
   }
 
-  async function loadVideos({ reset = false, nextFilter = libraryFilter, nextSearch = search } = {}) {
+  async function loadVideos({
+    reset = false,
+    nextFilter = libraryFilter,
+    nextSearch = search,
+    nextFolder = libraryFolder,
+  } = {}) {
     if (loadingVideos) return;
     setLoadingVideos(true);
 
     try {
       const offset = reset ? 0 : nextOffset;
-      const response = await api.getVideos({ offset, limit: 24, search: nextSearch, filter: nextFilter });
+      const response = await api.getVideos({
+        offset,
+        limit: 24,
+        search: nextSearch,
+        filter: nextFilter,
+        folder: nextFolder,
+      });
       setVideos((current) => (reset ? response.items : [...current, ...response.items]));
       setNextOffset(response.nextOffset ?? 0);
       setHasMore(response.nextOffset !== null);
+      setLibraryFolder(nextFolder);
+      const folderCounts = Array.isArray(response.folderCounts)
+        ? response.folderCounts
+        : (Array.isArray(response.folders) ? response.folders.map((tag) => ({ tag, count: 0 })) : []);
+      setLibraryFolderOptions(toFolderOptions(folderCounts));
     } catch (error) {
       setFlash(error.message);
     } finally {
@@ -606,11 +665,16 @@ export default function App() {
     }
   }
 
-  async function loadQueue(scope = queueScope, preferredId = currentFilterId) {
+  async function loadQueue(scope = queueScope, folder = queueFolder, preferredId = currentFilterId) {
     try {
-      const response = await api.getFilterQueue(scope);
+      const response = await api.getFilterQueue(scope, folder);
       setQueue(response.items);
       setQueueScope(scope);
+      setQueueFolder(folder);
+      const folderCounts = Array.isArray(response.folderCounts)
+        ? response.folderCounts
+        : (Array.isArray(response.folders) ? response.folders.map((tag) => ({ tag, count: 0 })) : []);
+      setQueueFolderOptions(toFolderOptions(folderCounts));
       const fallbackId = response.items.find((item) => item.id === preferredId)?.id ?? response.items[0]?.id ?? null;
       setCurrentFilterId(fallbackId);
     } catch (error) {
@@ -640,8 +704,8 @@ export default function App() {
       setQueueScope(preferredQueueScope);
       await Promise.all([
         refreshStats(),
-        loadVideos({ reset: true, nextFilter: libraryFilter, nextSearch: search }),
-        loadQueue(preferredQueueScope, currentFilterId),
+        loadVideos({ reset: true, nextFilter: libraryFilter, nextSearch: search, nextFolder: libraryFolder }),
+        loadQueue(preferredQueueScope, queueFolder, currentFilterId),
         loadTrash(),
       ]);
     } catch (error) {
@@ -655,11 +719,11 @@ export default function App() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      loadVideos({ reset: true, nextFilter: libraryFilter, nextSearch: search });
+      loadVideos({ reset: true, nextFilter: libraryFilter, nextSearch: search, nextFolder: libraryFolder });
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [libraryFilter, search]);
+  }, [libraryFilter, libraryFolder, search]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -684,10 +748,22 @@ export default function App() {
       params.delete('libFilter');
     }
 
+    if (libraryFolder !== 'all') {
+      params.set('libFolder', libraryFolder);
+    } else {
+      params.delete('libFolder');
+    }
+
     if (queueScope !== 'pending') {
       params.set('queueScope', queueScope);
     } else {
       params.delete('queueScope');
+    }
+
+    if (queueFolder !== 'all') {
+      params.set('queueFolder', queueFolder);
+    } else {
+      params.delete('queueFolder');
     }
 
     if (currentFilterId) {
@@ -699,7 +775,7 @@ export default function App() {
     const queryString = params.toString();
     const nextUrl = queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname;
     window.history.replaceState(null, '', nextUrl);
-  }, [activeTab, libraryFilter, queueScope, currentFilterId]);
+  }, [activeTab, libraryFilter, libraryFolder, queueScope, queueFolder, currentFilterId]);
 
   async function handleSaveSettings() {
     try {
@@ -711,7 +787,7 @@ export default function App() {
       setSettings(saved);
       setSettingsDraft(saved);
       setFlash('Settings saved.');
-      await loadQueue(saved.filterScope, currentFilterId);
+      await loadQueue(saved.filterScope, queueFolder, currentFilterId);
     } catch (error) {
       setFlash(error.message);
     }
@@ -755,7 +831,7 @@ export default function App() {
       await Promise.all([
         refreshStats(),
         loadVideos({ reset: true }),
-        loadQueue(queueScope, currentFilterId),
+        loadQueue(queueScope, queueFolder, currentFilterId),
         loadTrash(),
       ]);
     } catch (error) {
@@ -772,7 +848,7 @@ export default function App() {
       await Promise.all([
         refreshStats(),
         loadVideos({ reset: true }),
-        loadQueue(queueScope, fallbackId),
+        loadQueue(queueScope, queueFolder, fallbackId),
         loadTrash(),
       ]);
     } catch (error) {
@@ -786,7 +862,7 @@ export default function App() {
       await Promise.all([
         refreshStats(),
         loadVideos({ reset: true }),
-        loadQueue(queueScope, currentFilterId),
+        loadQueue(queueScope, queueFolder, currentFilterId),
         loadTrash(),
       ]);
     } catch (error) {
@@ -800,7 +876,7 @@ export default function App() {
       await Promise.all([
         refreshStats(),
         loadVideos({ reset: true }),
-        loadQueue(queueScope, currentFilterId),
+        loadQueue(queueScope, queueFolder, currentFilterId),
         loadTrash(),
       ]);
     } catch (error) {
@@ -814,7 +890,7 @@ export default function App() {
       await Promise.all([
         refreshStats(),
         loadVideos({ reset: true }),
-        loadQueue(queueScope, currentFilterId),
+        loadQueue(queueScope, queueFolder, currentFilterId),
         loadTrash(),
       ]);
     } catch (error) {
@@ -839,10 +915,16 @@ export default function App() {
             onReview={(id) => {
               setActiveTab('filter');
               setCurrentFilterId(id);
-              loadQueue(queueScope, id);
+              loadQueue(queueScope, queueFolder, id);
             }}
             filter={libraryFilter}
             onFilterChange={setLibraryFilter}
+            folder={libraryFolder}
+            onFolderChange={(value) => {
+              setLibraryFolder(value);
+              loadVideos({ reset: true, nextFilter: libraryFilter, nextSearch: search, nextFolder: value });
+            }}
+            folderOptions={libraryFolderOptions}
             search={search}
             onSearchChange={setSearch}
             viewMode={libraryViewMode}
@@ -859,10 +941,16 @@ export default function App() {
             scope={queueScope}
             onScopeChange={(value) => {
               setQueueScope(value);
-              loadQueue(value, currentFilterId);
+              loadQueue(value, queueFolder, currentFilterId);
             }}
+            folder={queueFolder}
+            onFolderChange={(value) => {
+              setQueueFolder(value);
+              loadQueue(queueScope, value, currentFilterId);
+            }}
+            folderOptions={queueFolderOptions}
             skipSeconds={Number(settings.skipSeconds) || 10}
-            onRefresh={() => loadQueue(queueScope, currentFilterId)}
+            onRefresh={() => loadQueue(queueScope, queueFolder, currentFilterId)}
           />
         )}
 
