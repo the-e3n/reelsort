@@ -1,0 +1,892 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api } from './api.js';
+
+const TABS = ['library', 'filter', 'trash', 'settings'];
+const FILTER_OPTIONS = [
+  { value: 'active', label: 'All active' },
+  { value: 'pending', label: 'Undecided' },
+  { value: 'kept', label: 'Kept' },
+  { value: 'trashed', label: 'Trash only' },
+];
+const FILTER_SCOPES = [
+  { value: 'pending', label: 'Undecided queue' },
+  { value: 'active', label: 'Kept + undecided' },
+  { value: 'kept', label: 'Kept only' },
+];
+
+const VALID_TAB_SET = new Set(TABS);
+const VALID_LIBRARY_FILTER_SET = new Set(FILTER_OPTIONS.map((option) => option.value));
+const VALID_QUEUE_SCOPE_SET = new Set(FILTER_SCOPES.map((option) => option.value));
+
+function getUrlState() {
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get('tab');
+  const libraryFilter = params.get('libFilter');
+  const queueScope = params.get('queueScope');
+  const videoId = Number.parseInt(params.get('video') || '', 10);
+
+  return {
+    tab: VALID_TAB_SET.has(tab) ? tab : 'library',
+    libraryFilter: VALID_LIBRARY_FILTER_SET.has(libraryFilter) ? libraryFilter : 'active',
+    queueScope: VALID_QUEUE_SCOPE_SET.has(queueScope) ? queueScope : 'pending',
+    hasQueueScope: VALID_QUEUE_SCOPE_SET.has(queueScope),
+    currentFilterId: Number.isFinite(videoId) ? videoId : null,
+  };
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** exponent;
+  return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
+
+function useInfiniteObserver(callback, enabled) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!enabled || !ref.current) return undefined;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) {
+        callback();
+      }
+    }, { rootMargin: '300px' });
+
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [callback, enabled]);
+
+  return ref;
+}
+
+function Sidebar({ branding, activeTab, onTabChange, stats }) {
+  return (
+    <aside className="sidebar">
+      <div className="sidebar__brand">
+        <span className="sidebar__eyebrow">Jellyfin filter deck</span>
+        <h1>{branding.appName || 'ReelSort'}</h1>
+        <p>{branding.appTagline}</p>
+      </div>
+
+      <nav className="sidebar__nav">
+        {TABS.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={`sidebar__tab ${tab === activeTab ? 'is-active' : ''}`}
+            onClick={() => onTabChange(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </nav>
+
+      <div className="sidebar__stats">
+        <div>
+          <span>Total</span>
+          <strong>{stats.total}</strong>
+        </div>
+        <div>
+          <span>Undecided</span>
+          <strong>{stats.pending}</strong>
+        </div>
+        <div>
+          <span>Trash</span>
+          <strong>{stats.trashed}</strong>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function FloatingHeader({ branding, settings, stats }) {
+  return (
+    <header className="floating-header">
+      <div className="floating-header__brand" title={branding.appDescription}>
+        <span className="eyebrow">{branding.appName}</span>
+        <strong>{branding.appTagline}</strong>
+      </div>
+      <div className="floating-header__stats" role="status" aria-live="polite">
+        <span>Total {stats.total}</span>
+        <span>Undecided {stats.pending}</span>
+        <span>Kept {stats.kept}</span>
+        <span>Trash {stats.trashed}</span>
+        <span>Size {formatBytes(stats.sizeBytes)}</span>
+      </div>
+      <div className="floating-header__path" title={settings.mediaPath || 'No media path configured'}>
+        Path {settings.mediaPath || 'Not configured'}
+      </div>
+    </header>
+  );
+}
+
+function LibraryCard({ item, onReview }) {
+  return (
+    <article className="video-card">
+      <div className="video-card__poster-wrap">
+        {item.posterUrl ? (
+          <img className="video-card__poster" src={item.posterUrl} alt={item.baseName} loading="lazy" />
+        ) : (
+          <div className="video-card__poster video-card__poster--empty">No poster</div>
+        )}
+        <span className={`video-card__badge is-${item.decision}`}>{item.decision}</span>
+      </div>
+      <div className="video-card__meta">
+        <h3 title={item.baseName}>{item.baseName}</h3>
+        {item.subdirectory && <span className="video-chip" title={item.subdirectory}>{item.subdirectory}</span>}
+        <p>{formatBytes(item.sizeBytes)}</p>
+        <div className="video-card__actions">
+          <button type="button" onClick={() => onReview(item.id)}>
+            Open in filter view
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function LibraryListItem({ item, onReview }) {
+  return (
+    <article className="video-list-item">
+      <div className="video-list-item__poster-wrap">
+        {item.posterUrl ? (
+          <img className="video-list-item__poster" src={item.posterUrl} alt={item.baseName} loading="lazy" />
+        ) : (
+          <div className="video-list-item__poster video-list-item__poster--empty">No poster</div>
+        )}
+      </div>
+      <div className="video-list-item__body">
+        <h3 title={item.baseName}>{item.baseName}</h3>
+        {item.subdirectory && <span className="video-chip" title={item.subdirectory}>{item.subdirectory}</span>}
+        <p>{formatBytes(item.sizeBytes)}</p>
+      </div>
+      <div className="video-list-item__status">
+        <span className={`video-card__badge is-${item.decision}`}>{item.decision}</span>
+      </div>
+      <div className="video-list-item__actions">
+        <button type="button" onClick={() => onReview(item.id)}>
+          Open in filter view
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function LibraryView({
+  items,
+  hasMore,
+  loading,
+  onLoadMore,
+  onReview,
+  filter,
+  onFilterChange,
+  search,
+  onSearchChange,
+  viewMode,
+  onViewModeChange,
+}) {
+  const sentinelRef = useInfiniteObserver(onLoadMore, hasMore && !loading);
+
+  return (
+    <section className="panel">
+      <header className="panel__header">
+        <div>
+          <h2>Video Library</h2>
+        </div>
+        <div className="toolbar">
+          <input value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search filename" />
+          <select value={filter} onChange={(event) => onFilterChange(event.target.value)}>
+            {FILTER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <div className="view-mode-toggle" role="group" aria-label="Library view mode">
+            <button
+              type="button"
+              className={viewMode === 'list' ? 'is-active' : ''}
+              onClick={() => onViewModeChange('list')}
+            >
+              List
+            </button>
+            <button
+              type="button"
+              className={viewMode === 'card' ? 'is-active' : ''}
+              onClick={() => onViewModeChange('card')}
+            >
+              Card
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {viewMode === 'card' ? (
+        <div className="video-grid">
+          {items.map((item) => (
+            <LibraryCard key={item.id} item={item} onReview={onReview} />
+          ))}
+        </div>
+      ) : (
+        <div className="video-list">
+          {items.map((item) => (
+            <LibraryListItem key={item.id} item={item} onReview={onReview} />
+          ))}
+        </div>
+      )}
+
+      {loading && <div className="panel__notice">Loading more videos…</div>}
+      {!items.length && !loading && <div className="panel__notice">No videos match the current filter.</div>}
+      <div ref={sentinelRef} className="scroll-sentinel" />
+    </section>
+  );
+}
+
+function FilterView({ queue, currentId, onSelect, onDecision, scope, onScopeChange, skipSeconds, onRefresh }) {
+  const videoRef = useRef(null);
+  const lastPRef = useRef(0);
+  const saveTickRef = useRef(0);
+  const [showQueueCards, setShowQueueCards] = useState(true);
+  const current = useMemo(() => queue.find((item) => item.id === currentId) || queue[0] || null, [queue, currentId]);
+  const currentIndex = current ? queue.findIndex((item) => item.id === current.id) : -1;
+  const previous = currentIndex > 0 ? queue[currentIndex - 1] : null;
+  const next = currentIndex >= 0 ? queue[currentIndex + 1] : null;
+
+  const togglePlayPause = () => {
+    if (!videoRef.current) return;
+
+    if (videoRef.current.paused) {
+      videoRef.current.play().catch(() => {});
+      return;
+    }
+
+    videoRef.current.pause();
+  };
+
+  useEffect(() => {
+    if (!current) return undefined;
+
+    const onKeyDown = async (event) => {
+      const tagName = event.target?.tagName?.toLowerCase();
+      if (tagName === 'input' || tagName === 'textarea') {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === 'k') {
+        event.preventDefault();
+        await onDecision(current.id, 'kept');
+      }
+      if (key === 'arrowleft' && previous) {
+        event.preventDefault();
+        onSelect(previous.id);
+      }
+      if (key === 'arrowright' && next) {
+        event.preventDefault();
+        onSelect(next.id);
+      }
+      if (key === 's' && videoRef.current) {
+        event.preventDefault();
+        togglePlayPause();
+      }
+      if (key === 'a' && videoRef.current) {
+        event.preventDefault();
+        videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - skipSeconds);
+      }
+      if (key === 'd' && videoRef.current) {
+        event.preventDefault();
+        videoRef.current.currentTime += skipSeconds;
+      }
+      if (key === 'p') {
+        const now = Date.now();
+        if (now - lastPRef.current < 700) {
+          event.preventDefault();
+          await onDecision(current.id, 'trashed');
+          lastPRef.current = 0;
+        } else {
+          lastPRef.current = now;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [current, next, onDecision, onSelect, previous, skipSeconds]);
+
+  useEffect(() => {
+    if (videoRef.current && current) {
+      const element = videoRef.current;
+      const onTimeUpdate = () => {
+        const now = Date.now();
+        if (now - saveTickRef.current > 2500) {
+          saveTickRef.current = now;
+          api.savePlayback(current.id, element.currentTime).catch(() => {});
+        }
+      };
+
+      element.addEventListener('timeupdate', onTimeUpdate);
+      return () => element.removeEventListener('timeupdate', onTimeUpdate);
+    }
+
+    return undefined;
+  }, [current]);
+
+  useEffect(() => {
+    if (!videoRef.current || !current) {
+      return undefined;
+    }
+
+    const element = videoRef.current;
+    const targetTime = 0;
+    const setStartTime = () => {
+      element.currentTime = targetTime;
+    };
+
+    if (element.readyState >= 1) {
+      setStartTime();
+      return undefined;
+    }
+
+    element.addEventListener('loadedmetadata', setStartTime, { once: true });
+    return () => {
+      element.removeEventListener('loadedmetadata', setStartTime);
+    };
+  }, [current]);
+
+  return (
+    <section className="panel panel--wide panel--filter">
+      <header className="panel__header panel__header--stacked">
+        <div className="filter-header-main">
+          <h2 className="filter-header-title" title={current?.filename || 'No video selected'}>
+            {current?.filename || 'No video selected'}
+          </h2>
+        </div>
+        <div className="toolbar toolbar--wrap">
+          <select value={scope} onChange={(event) => onScopeChange(event.target.value)}>
+            {FILTER_SCOPES.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <button type="button" className="ghost-button" onClick={onRefresh}>Refresh queue</button>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => setShowQueueCards((value) => !value)}
+          >
+            Queue cards {showQueueCards ? 'On' : 'Off'}
+          </button>
+          <span className="pill">{queue.length} videos in queue</span>
+        </div>
+      </header>
+
+      {!current ? (
+        <div className="empty-state">
+          <h3>No videos available in this queue</h3>
+          <p>Change the filter scope or rescan the folder after adding more media.</p>
+        </div>
+      ) : (
+        <>
+          <div className="theater">
+            <div className="theater__stage">
+              <video
+                key={current.id}
+                ref={videoRef}
+                className="theater__video"
+                src={current.videoUrl}
+                poster={current.posterUrl || undefined}
+                controls
+                autoPlay
+              />
+              <button
+                type="button"
+                className="theater__overlay-nav theater__overlay-nav--left"
+                disabled={!previous}
+                onClick={() => previous && onSelect(previous.id)}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                className="theater__overlay-nav theater__overlay-nav--right"
+                disabled={!next}
+                onClick={() => next && onSelect(next.id)}
+              >
+                Next
+              </button>
+              <div className="theater__caption">
+                <h3>{current.baseName}</h3>
+                <p>{formatBytes(current.sizeBytes)} · {current.decision}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="decision-bar">
+            <button type="button" onClick={() => onDecision(current.id, 'kept')}>Keep <span>(K)</span></button>
+            <button type="button" onClick={() => onDecision(current.id, 'trashed')}>Delete to trash <span>(P P)</span></button>
+            <button type="button" onClick={() => videoRef.current && (videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - skipSeconds))}>-{skipSeconds}s <span>(A)</span></button>
+            <button type="button" onClick={() => videoRef.current && (videoRef.current.currentTime += skipSeconds)}>+{skipSeconds}s <span>(D)</span></button>
+            <button type="button" onClick={togglePlayPause}>Play/Pause <span>(S)</span></button>
+          </div>
+
+          {showQueueCards && (
+            <div className="queue-strip">
+              {queue.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`queue-strip__item ${item.id === current.id ? 'is-current' : ''}`}
+                  onClick={() => onSelect(item.id)}
+                >
+                  {item.posterUrl ? <img src={item.posterUrl} alt="" loading="lazy" /> : <span>No poster</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function TrashView({ items, onRestore, onPermanentDelete, onPermanentDeleteAll }) {
+  return (
+    <section className="panel">
+      <header className="panel__header">
+        <div>
+          <span className="eyebrow">Trash</span>
+          <h2>Soft-deleted videos</h2>
+        </div>
+        {!!items.length && (
+          <button
+            type="button"
+            className="danger-button"
+            onClick={() => {
+              if (window.confirm('Permanently delete all trashed videos and their posters?')) {
+                onPermanentDeleteAll();
+              }
+            }}
+          >
+            Delete all
+          </button>
+        )}
+      </header>
+
+      {!items.length ? (
+        <div className="panel__notice">Trash is empty. Videos soft-deleted from filter view will land here.</div>
+      ) : (
+        <div className="trash-list">
+          {items.map((item) => (
+            <article key={item.id} className="trash-item">
+              {item.posterUrl ? <img src={item.posterUrl} alt="" /> : <div className="trash-item__poster">No poster</div>}
+              <div className="trash-item__content">
+                <h3>{item.baseName}</h3>
+                <p>{formatBytes(item.sizeBytes)}</p>
+              </div>
+              <div className="trash-item__actions">
+                <button type="button" className="ghost-button" onClick={() => onRestore(item.id)}>Restore</button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  onClick={() => {
+                    if (window.confirm(`Permanently delete ${item.baseName} and its poster?`)) {
+                      onPermanentDelete(item.id);
+                    }
+                  }}
+                >
+                  Delete forever
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SettingsView({ branding, settingsDraft, onChange, onSave, onScan, scanStatus, scanProgress }) {
+  const percent = scanProgress.total > 0
+    ? Math.min(100, Math.round((scanProgress.added / scanProgress.total) * 100))
+    : 0;
+
+  return (
+    <section className="panel settings-panel">
+      <header className="panel__header">
+        <div>
+          <span className="eyebrow">Settings</span>
+          <h2>Server media path and defaults</h2>
+        </div>
+      </header>
+
+      <div className="settings-grid">
+        <label>
+          <span>App name preview</span>
+          <input value={branding.appName || ''} disabled />
+        </label>
+        <label>
+          <span>Media folder path on server</span>
+          <input value={settingsDraft.mediaPath} onChange={(event) => onChange('mediaPath', event.target.value)} placeholder="/mnt/media/downloads" />
+        </label>
+        <label>
+          <span>Skip interval in seconds</span>
+          <input type="number" min="1" value={settingsDraft.skipSeconds} onChange={(event) => onChange('skipSeconds', event.target.value)} />
+        </label>
+        <label>
+          <span>Default filter queue</span>
+          <select value={settingsDraft.filterScope} onChange={(event) => onChange('filterScope', event.target.value)}>
+            {FILTER_SCOPES.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="settings-actions">
+        <button type="button" onClick={onSave}>Save settings</button>
+        <button type="button" className="ghost-button" onClick={onScan}>Scan folder</button>
+      </div>
+
+      {(scanProgress.running || scanProgress.total > 0) && (
+        <div className="scan-progress" aria-live="polite">
+          <div className="scan-progress__label">
+            <span>Progress</span>
+            <strong>{scanProgress.added}/{scanProgress.total || 0}</strong>
+          </div>
+          <div className="scan-progress__track" role="progressbar" aria-valuemin={0} aria-valuemax={scanProgress.total || 0} aria-valuenow={scanProgress.added}>
+            <div className="scan-progress__fill" style={{ width: `${percent}%` }} />
+          </div>
+        </div>
+      )}
+
+      {scanStatus && <div className="panel__notice">{scanStatus}</div>}
+    </section>
+  );
+}
+
+export default function App() {
+  const initialUrlState = getUrlState();
+  const [branding, setBranding] = useState({ appName: 'ReelSort', appTagline: '' });
+  const [activeTab, setActiveTab] = useState(initialUrlState.tab);
+  const [settings, setSettings] = useState({ mediaPath: '', skipSeconds: 10, filterScope: 'pending' });
+  const [settingsDraft, setSettingsDraft] = useState({ mediaPath: '', skipSeconds: 10, filterScope: 'pending' });
+  const [stats, setStats] = useState({ total: 0, pending: 0, kept: 0, trashed: 0, sizeBytes: 0 });
+  const [videos, setVideos] = useState([]);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [libraryFilter, setLibraryFilter] = useState(initialUrlState.libraryFilter);
+  const [libraryViewMode, setLibraryViewMode] = useState('list');
+  const [search, setSearch] = useState('');
+  const [loadingVideos, setLoadingVideos] = useState(false);
+  const [queue, setQueue] = useState([]);
+  const [queueScope, setQueueScope] = useState(initialUrlState.queueScope);
+  const [currentFilterId, setCurrentFilterId] = useState(initialUrlState.currentFilterId);
+  const [trash, setTrash] = useState([]);
+  const [scanStatus, setScanStatus] = useState('');
+  const [scanProgress, setScanProgress] = useState({ running: false, added: 0, total: 0 });
+  const [flash, setFlash] = useState('');
+
+  async function refreshStats() {
+    setStats(await api.getStats());
+  }
+
+  async function loadVideos({ reset = false, nextFilter = libraryFilter, nextSearch = search } = {}) {
+    if (loadingVideos) return;
+    setLoadingVideos(true);
+
+    try {
+      const offset = reset ? 0 : nextOffset;
+      const response = await api.getVideos({ offset, limit: 24, search: nextSearch, filter: nextFilter });
+      setVideos((current) => (reset ? response.items : [...current, ...response.items]));
+      setNextOffset(response.nextOffset ?? 0);
+      setHasMore(response.nextOffset !== null);
+    } catch (error) {
+      setFlash(error.message);
+    } finally {
+      setLoadingVideos(false);
+    }
+  }
+
+  async function loadQueue(scope = queueScope, preferredId = currentFilterId) {
+    try {
+      const response = await api.getFilterQueue(scope);
+      setQueue(response.items);
+      setQueueScope(scope);
+      const fallbackId = response.items.find((item) => item.id === preferredId)?.id ?? response.items[0]?.id ?? null;
+      setCurrentFilterId(fallbackId);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  async function loadTrash() {
+    try {
+      const response = await api.getTrash();
+      setTrash(response.items);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  async function bootstrap() {
+    try {
+      const [brandingResponse, settingsResponse] = await Promise.all([
+        api.getBranding(),
+        api.getSettings(),
+      ]);
+      setBranding(brandingResponse);
+      setSettings(settingsResponse);
+      setSettingsDraft(settingsResponse);
+      const preferredQueueScope = initialUrlState.hasQueueScope ? queueScope : (settingsResponse.filterScope || 'pending');
+      setQueueScope(preferredQueueScope);
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true, nextFilter: libraryFilter, nextSearch: search }),
+        loadQueue(preferredQueueScope, currentFilterId),
+        loadTrash(),
+      ]);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  useEffect(() => {
+    bootstrap();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      loadVideos({ reset: true, nextFilter: libraryFilter, nextSearch: search });
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [libraryFilter, search]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    if (activeTab === 'filter') {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [activeTab]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', activeTab);
+
+    if (libraryFilter !== 'active') {
+      params.set('libFilter', libraryFilter);
+    } else {
+      params.delete('libFilter');
+    }
+
+    if (queueScope !== 'pending') {
+      params.set('queueScope', queueScope);
+    } else {
+      params.delete('queueScope');
+    }
+
+    if (currentFilterId) {
+      params.set('video', String(currentFilterId));
+    } else {
+      params.delete('video');
+    }
+
+    const queryString = params.toString();
+    const nextUrl = queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname;
+    window.history.replaceState(null, '', nextUrl);
+  }, [activeTab, libraryFilter, queueScope, currentFilterId]);
+
+  async function handleSaveSettings() {
+    try {
+      const saved = await api.saveSettings({
+        mediaPath: settingsDraft.mediaPath,
+        skipSeconds: Number(settingsDraft.skipSeconds),
+        filterScope: settingsDraft.filterScope,
+      });
+      setSettings(saved);
+      setSettingsDraft(saved);
+      setFlash('Settings saved.');
+      await loadQueue(saved.filterScope, currentFilterId);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  async function handleScan() {
+    try {
+      setScanStatus('Starting scan…');
+      setScanProgress({ running: true, added: 0, total: 0 });
+      await api.startScan(settingsDraft.mediaPath);
+
+      while (true) {
+        const progress = await api.getScanProgress();
+        setScanProgress({
+          running: Boolean(progress.running),
+          added: Number(progress.added) || 0,
+          total: Number(progress.total) || 0,
+        });
+        setScanStatus(`Scanning ${progress.added}/${progress.total}`);
+
+        if (!progress.running) {
+          if (progress.error) {
+            setScanProgress((current) => ({ ...current, running: false }));
+            throw new Error(progress.error);
+          }
+
+          setScanStatus(`Scan complete: ${progress.added}/${progress.total}`);
+          setScanProgress({
+            running: false,
+            added: Number(progress.added) || 0,
+            total: Number(progress.total) || 0,
+          });
+          break;
+        }
+
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, 250);
+        });
+      }
+
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, currentFilterId),
+        loadTrash(),
+      ]);
+    } catch (error) {
+      setScanProgress((current) => ({ ...current, running: false }));
+      setScanStatus(error.message);
+    }
+  }
+
+  async function handleDecision(id, decision) {
+    try {
+      const currentIndex = queue.findIndex((item) => item.id === id);
+      const fallbackId = queue[currentIndex + 1]?.id ?? queue[currentIndex - 1]?.id ?? null;
+      await api.setDecision(id, decision);
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, fallbackId),
+        loadTrash(),
+      ]);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  async function handleRestore(id) {
+    try {
+      await api.restoreTrash(id);
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, currentFilterId),
+        loadTrash(),
+      ]);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  async function handlePermanentDelete(id) {
+    try {
+      await api.permanentDelete(id);
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, currentFilterId),
+        loadTrash(),
+      ]);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  async function handlePermanentDeleteAllTrash() {
+    try {
+      await api.permanentDeleteAllTrash();
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, currentFilterId),
+        loadTrash(),
+      ]);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  return (
+    <div className="app-shell">
+      <Sidebar branding={branding} activeTab={activeTab} onTabChange={setActiveTab} stats={stats} />
+      <main className={`main-stage ${activeTab === 'filter' ? 'main-stage--filter' : ''}`}>
+        {activeTab !== 'filter' && <FloatingHeader branding={branding} settings={settings} stats={stats} />}
+
+        {flash && <div className="flash-banner">{flash}</div>}
+
+        {activeTab === 'library' && (
+          <LibraryView
+            items={videos}
+            hasMore={hasMore}
+            loading={loadingVideos}
+            onLoadMore={() => loadVideos()}
+            onReview={(id) => {
+              setActiveTab('filter');
+              setCurrentFilterId(id);
+              loadQueue(queueScope, id);
+            }}
+            filter={libraryFilter}
+            onFilterChange={setLibraryFilter}
+            search={search}
+            onSearchChange={setSearch}
+            viewMode={libraryViewMode}
+            onViewModeChange={setLibraryViewMode}
+          />
+        )}
+
+        {activeTab === 'filter' && (
+          <FilterView
+            queue={queue}
+            currentId={currentFilterId}
+            onSelect={setCurrentFilterId}
+            onDecision={handleDecision}
+            scope={queueScope}
+            onScopeChange={(value) => {
+              setQueueScope(value);
+              loadQueue(value, currentFilterId);
+            }}
+            skipSeconds={Number(settings.skipSeconds) || 10}
+            onRefresh={() => loadQueue(queueScope, currentFilterId)}
+          />
+        )}
+
+        {activeTab === 'trash' && (
+          <TrashView
+            items={trash}
+            onRestore={handleRestore}
+            onPermanentDelete={handlePermanentDelete}
+            onPermanentDeleteAll={handlePermanentDeleteAllTrash}
+          />
+        )}
+
+        {activeTab === 'settings' && (
+          <SettingsView
+            branding={branding}
+            settingsDraft={settingsDraft}
+            onChange={(key, value) => setSettingsDraft((current) => ({ ...current, [key]: value }))}
+            onSave={handleSaveSettings}
+            onScan={handleScan}
+            scanStatus={scanStatus}
+            scanProgress={scanProgress}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
