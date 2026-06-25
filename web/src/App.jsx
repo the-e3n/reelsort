@@ -133,7 +133,14 @@ function FloatingHeader({ branding, settings, stats }) {
   );
 }
 
-function LibraryCard({ item, onReview }) {
+function LibraryCard({ item, onReview, onQuickAction }) {
+  const actions = item.decision === 'pending'
+    ? [
+      { label: 'Keep', decision: 'kept', className: 'ghost-button' },
+      { label: 'Trash', decision: 'trashed', className: 'danger-button' },
+    ]
+    : [{ label: 'Revert', decision: 'pending', className: 'ghost-button' }];
+
   return (
     <article className="video-card">
       <div className="video-card__poster-wrap">
@@ -152,13 +159,30 @@ function LibraryCard({ item, onReview }) {
           <button type="button" onClick={() => onReview(item.id)}>
             Open in filter view
           </button>
+          {actions.map((action) => (
+            <button
+              key={action.decision}
+              type="button"
+              className={action.className}
+              onClick={() => onQuickAction(item.id, action.decision)}
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
       </div>
     </article>
   );
 }
 
-function LibraryListItem({ item, onReview }) {
+function LibraryListItem({ item, onReview, onQuickAction }) {
+  const actions = item.decision === 'pending'
+    ? [
+      { label: 'Keep', decision: 'kept', className: 'ghost-button' },
+      { label: 'Trash', decision: 'trashed', className: 'danger-button' },
+    ]
+    : [{ label: 'Revert', decision: 'pending', className: 'ghost-button' }];
+
   return (
     <article className="video-list-item">
       <div className="video-list-item__poster-wrap">
@@ -180,6 +204,16 @@ function LibraryListItem({ item, onReview }) {
         <button type="button" onClick={() => onReview(item.id)}>
           Open in filter view
         </button>
+        {actions.map((action) => (
+          <button
+            key={action.decision}
+            type="button"
+            className={action.className}
+            onClick={() => onQuickAction(item.id, action.decision)}
+          >
+            {action.label}
+          </button>
+        ))}
       </div>
     </article>
   );
@@ -191,6 +225,7 @@ function LibraryView({
   loading,
   onLoadMore,
   onReview,
+  onQuickAction,
   filter,
   onFilterChange,
   folder,
@@ -245,13 +280,13 @@ function LibraryView({
       {viewMode === 'card' ? (
         <div className="video-grid">
           {items.map((item) => (
-            <LibraryCard key={item.id} item={item} onReview={onReview} />
+            <LibraryCard key={item.id} item={item} onReview={onReview} onQuickAction={onQuickAction} />
           ))}
         </div>
       ) : (
         <div className="video-list">
           {items.map((item) => (
-            <LibraryListItem key={item.id} item={item} onReview={onReview} />
+            <LibraryListItem key={item.id} item={item} onReview={onReview} onQuickAction={onQuickAction} />
           ))}
         </div>
       )}
@@ -856,6 +891,20 @@ export default function App() {
     }
   }
 
+  async function handleLibraryQuickAction(id, decision) {
+    try {
+      await api.setDecision(id, decision);
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, queueFolder, currentFilterId),
+        loadTrash(),
+      ]);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
   async function handleRestore(id) {
     try {
       await api.restoreTrash(id);
@@ -917,6 +966,7 @@ export default function App() {
               setCurrentFilterId(id);
               loadQueue(queueScope, queueFolder, id);
             }}
+            onQuickAction={handleLibraryQuickAction}
             filter={libraryFilter}
             onFilterChange={setLibraryFilter}
             folder={libraryFolder}

@@ -520,7 +520,16 @@ select {
 }
 
 .video-list-item__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
   justify-self: end;
+}
+
+.video-card__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .video-card__actions button,
