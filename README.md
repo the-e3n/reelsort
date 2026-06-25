@@ -42,6 +42,23 @@ Then open http://localhost:4000 and set media path to `/media` in Settings.
 ## Quick Start (Docker Compose)
 
 This repository includes `docker-compose.yml` for local testing.
+For production deployments, you may want to customize the compose file to your needs.
+A sample compose snippet is below:
+
+```docker-compose
+services: 
+  reelsort: 
+    image: ghcr.io/the-e3n/reelsort:latest 
+    container_name: reelsort 
+    ports: 
+      - "4000:4000" 
+    volumes: 
+      - path/to/media:/media # /media can be any path inside container. Final path can be configured in ui 
+      - reelsort_data:/app/server/data 
+    restart: unless-stopped
+  volumes:
+    reelsort_data:
+```
 
 ```bash
 docker compose up -d --build

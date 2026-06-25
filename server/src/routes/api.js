@@ -3,8 +3,10 @@ import path from 'node:path';
 import { BRANDING } from '../config/branding.js';
 import { DECISIONS, DEFAULT_PAGE_SIZE, FILTER_SCOPES } from '../config/constants.js';
 import {
+  getFilterQueueFolderCounts,
   getFilterQueue,
   getStats,
+  getVideoFolderCounts,
   getTrashVideos,
   getVideoById,
   getVideos,
@@ -94,18 +96,26 @@ router.get('/videos', (req, res) => {
   const limit = Number.parseInt(req.query.limit, 10) || DEFAULT_PAGE_SIZE;
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
   const filter = typeof req.query.filter === 'string' ? req.query.filter : 'active';
+  const folder = typeof req.query.folder === 'string' ? req.query.folder : 'all';
 
-  const result = getVideos({ offset, limit, search, filter });
+  const result = getVideos({ offset, limit, search, filter, folder });
+  const folderCounts = getVideoFolderCounts({ filter, search });
+  const folders = folderCounts.map((item) => item.tag);
   res.json({
     ...result,
+    folderCounts,
+    folders,
     items: result.items.map(serializeVideo),
   });
 });
 
 router.get('/filter/queue', (req, res) => {
   const scope = typeof req.query.scope === 'string' ? req.query.scope : FILTER_SCOPES.PENDING;
-  const queue = getFilterQueue(scope).map(serializeVideo);
-  res.json({ items: queue, scope });
+  const folder = typeof req.query.folder === 'string' ? req.query.folder : 'all';
+  const queue = getFilterQueue(scope, folder).map(serializeVideo);
+  const folderCounts = getFilterQueueFolderCounts(scope);
+  const folders = folderCounts.map((item) => item.tag);
+  res.json({ items: queue, scope, folder, folders, folderCounts });
 });
 
 router.post('/videos/:id/decision', (req, res, next) => {

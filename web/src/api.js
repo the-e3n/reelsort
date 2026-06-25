@@ -36,11 +36,12 @@ export const api = {
     }),
   getScanProgress: () => request('/api/scan/progress'),
   getStats: () => request('/api/stats'),
-  getVideos: ({ offset = 0, limit = 30, search = '', filter = 'active' }) =>
+  getVideos: ({ offset = 0, limit = 30, search = '', filter = 'active', folder = 'all' }) =>
     request(
-      `/api/videos?offset=${offset}&limit=${limit}&search=${encodeURIComponent(search)}&filter=${filter}`
+      `/api/videos?offset=${offset}&limit=${limit}&search=${encodeURIComponent(search)}&filter=${filter}&folder=${encodeURIComponent(folder)}`
     ),
-  getFilterQueue: (scope) => request(`/api/filter/queue?scope=${scope}`),
+  getFilterQueue: (scope, folder = 'all') =>
+    request(`/api/filter/queue?scope=${scope}&folder=${encodeURIComponent(folder)}`),
   setDecision: (id, decision) =>
     request(`/api/videos/${id}/decision`, {
       method: 'POST',
