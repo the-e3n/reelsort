@@ -60,6 +60,17 @@ const updateDecisionStmt = db.prepare(
 const updatePlaybackStmt = db.prepare(
   'UPDATE videos SET playback_position_seconds = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
 );
+const updateLocationStmt = db.prepare(
+  `UPDATE videos
+   SET relative_path = @relativePath,
+       filename = @filename,
+       subdirectory = @subdirectory,
+       poster_relative_path = @posterRelativePath,
+       size_bytes = @sizeBytes,
+       mtime_ms = @mtimeMs,
+       updated_at = CURRENT_TIMESTAMP
+   WHERE id = @id`
+);
 const findByIdStmt = db.prepare('SELECT * FROM videos WHERE id = ?');
 const findManyByDecisionStmt = db.prepare(
   'SELECT * FROM videos WHERE decision = ? ORDER BY base_name COLLATE NOCASE ASC'
@@ -243,6 +254,28 @@ export function setDecision(id, decision) {
 
 export function setPlaybackPosition(id, positionSeconds) {
   updatePlaybackStmt.run(positionSeconds, id);
+  return getVideoById(id);
+}
+
+export function updateVideoLocation({
+  id,
+  relativePath,
+  filename,
+  subdirectory,
+  posterRelativePath,
+  sizeBytes,
+  mtimeMs,
+}) {
+  updateLocationStmt.run({
+    id,
+    relativePath,
+    filename,
+    subdirectory: subdirectory || null,
+    posterRelativePath: posterRelativePath || null,
+    sizeBytes,
+    mtimeMs,
+  });
+
   return getVideoById(id);
 }
 

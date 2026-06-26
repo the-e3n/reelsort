@@ -5,6 +5,7 @@ import { DECISIONS, DEFAULT_PAGE_SIZE, FILTER_SCOPES } from '../config/constants
 import {
   getFilterQueueFolderCounts,
   getFilterQueue,
+  getQueueFolderTags,
   getStats,
   getVideoFolderCounts,
   getTrashVideos,
@@ -15,6 +16,7 @@ import {
 } from '../db/videoRepository.js';
 import {
   keepVideo,
+  moveVideoToFolder,
   permanentlyDeleteAllTrashedVideos,
   permanentlyDeleteVideo,
   restoreVideo,
@@ -45,6 +47,9 @@ router.post('/settings', (req, res) => {
   const mediaPath = typeof req.body.mediaPath === 'string' ? req.body.mediaPath.trim() : undefined;
   const skipSeconds = Number(req.body.skipSeconds);
   const filterScope = typeof req.body.filterScope === 'string' ? req.body.filterScope : undefined;
+  const shortcuts = typeof req.body.shortcuts === 'object' && req.body.shortcuts !== null
+    ? req.body.shortcuts
+    : undefined;
 
   const payload = {};
 
@@ -58,6 +63,10 @@ router.post('/settings', (req, res) => {
 
   if (Object.values(FILTER_SCOPES).includes(filterScope)) {
     payload.filterScope = filterScope;
+  }
+
+  if (shortcuts !== undefined) {
+    payload.shortcuts = shortcuts;
   }
 
   const settings = updateSettings(payload);
@@ -115,7 +124,19 @@ router.get('/filter/queue', (req, res) => {
   const queue = getFilterQueue(scope, folder).map(serializeVideo);
   const folderCounts = getFilterQueueFolderCounts(scope);
   const folders = folderCounts.map((item) => item.tag);
-  res.json({ items: queue, scope, folder, folders, folderCounts });
+  const allFolders = getQueueFolderTags();
+  res.json({ items: queue, scope, folder, folders, folderCounts, allFolders });
+});
+
+router.post('/videos/:id/move', async (req, res, next) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const targetFolder = typeof req.body?.targetFolder === 'string' ? req.body.targetFolder : '__root__';
+    const moved = await moveVideoToFolder(id, targetFolder);
+    res.json(serializeVideo(moved));
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/videos/:id/decision', (req, res, next) => {
