@@ -135,18 +135,6 @@ If package visibility is private, configure registry auth in Docker/Portainer wi
 - `web/`: React + Vite frontend
 - `sample/`: sample media for local testing
 
-## Notes for TrueNAS / Home Server Deployments
+# AI Disclosure
+This project is generated using copilot however i have vetted everything. Also i have used this for my own library but still please proceed with caution.
 
-- Run ReelSort on the same machine (or with mounted paths) where media files are accessible.
-- Use explicit dataset permissions for controlled delete behavior.
-- Permanent delete removes both video and matched poster file.
-
-## Limitations
-
-- No auth/multi-user features yet
-- No background filesystem watcher yet (scan manually)
-- No Jellyfin API integration yet
-
-## Branding
-
-Branding constants are in `server/src/config/branding.js`.
