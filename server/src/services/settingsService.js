@@ -5,6 +5,17 @@ const defaults = {
   mediaPath: '',
   skipSeconds: BRANDING.defaultSkipSeconds,
   filterScope: 'pending',
+  shortcuts: {
+    keep: 'k',
+    trash: 'p',
+    moveCurrent: 'm',
+    playPause: 's',
+    seekBack: 'a',
+    seekForward: 'd',
+    previous: 'ArrowLeft',
+    next: 'ArrowRight',
+    folderMoves: {},
+  },
 };
 
 const getStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
@@ -24,10 +35,20 @@ export function setSetting(key, value) {
 }
 
 export function getSettings() {
+  const savedShortcuts = getSetting('shortcuts', {});
+
   return {
     mediaPath: getSetting('mediaPath', defaults.mediaPath),
     skipSeconds: getSetting('skipSeconds', defaults.skipSeconds),
     filterScope: getSetting('filterScope', defaults.filterScope),
+    shortcuts: {
+      ...defaults.shortcuts,
+      ...savedShortcuts,
+      folderMoves: {
+        ...defaults.shortcuts.folderMoves,
+        ...(savedShortcuts.folderMoves || {}),
+      },
+    },
   };
 }
 
@@ -43,6 +64,14 @@ export function updateSettings(next) {
   setSetting('mediaPath', merged.mediaPath);
   setSetting('skipSeconds', Number(merged.skipSeconds) || defaults.skipSeconds);
   setSetting('filterScope', merged.filterScope || defaults.filterScope);
+  setSetting('shortcuts', {
+    ...defaults.shortcuts,
+    ...(merged.shortcuts || {}),
+    folderMoves: {
+      ...defaults.shortcuts.folderMoves,
+      ...((merged.shortcuts || {}).folderMoves || {}),
+    },
+  });
 
   return getSettings();
 }

@@ -13,6 +13,17 @@ const FILTER_SCOPES = [
   { value: 'active', label: 'Kept + undecided' },
   { value: 'kept', label: 'Kept only' },
 ];
+const DEFAULT_SHORTCUTS = {
+  keep: 'k',
+  trash: 'p',
+  moveCurrent: 'm',
+  playPause: 's',
+  seekBack: 'a',
+  seekForward: 'd',
+  previous: 'ArrowLeft',
+  next: 'ArrowRight',
+  folderMoves: {},
+};
 
 const VALID_TAB_SET = new Set(TABS);
 const VALID_LIBRARY_FILTER_SET = new Set(FILTER_OPTIONS.map((option) => option.value));
@@ -51,6 +62,48 @@ function toFolderOptions(folderCounts = []) {
     value: item.tag,
     label: `${item.tag === '__root__' ? 'Root folder' : item.tag} (${item.count})`,
   }));
+}
+
+function normalizeShortcut(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function formatShortcutLabel(value) {
+  return String(value || '').trim() || 'Unassigned';
+}
+
+function toMoveFolderOptions(folderTags = []) {
+  return folderTags.map((tag) => ({
+    value: tag,
+    label: tag === '__root__' ? 'Root folder' : tag,
+  }));
+}
+
+function mergeShortcuts(raw = {}) {
+  return {
+    ...DEFAULT_SHORTCUTS,
+    ...raw,
+    folderMoves: {
+      ...DEFAULT_SHORTCUTS.folderMoves,
+      ...(raw.folderMoves || {}),
+    },
+  };
+}
+
+function getFolderChipStyle(folderName) {
+  const label = folderName === '__root__' ? 'root' : String(folderName || 'root');
+  let hash = 0;
+
+  for (let index = 0; index < label.length; index += 1) {
+    hash = (hash * 31 + label.charCodeAt(index)) % 360;
+  }
+
+  const hue = hash;
+  return {
+    '--chip-fg': `hsl(${hue} 68% 24%)`,
+    '--chip-bg': `hsl(${hue} 85% 92%)`,
+    '--chip-border': `hsl(${hue} 70% 74%)`,
+  };
 }
 
 function useInfiniteObserver(callback, enabled) {
@@ -153,7 +206,11 @@ function LibraryCard({ item, onReview, onQuickAction }) {
       </div>
       <div className="video-card__meta">
         <h3 title={item.baseName}>{item.baseName}</h3>
-        {item.subdirectory && <span className="video-chip" title={item.subdirectory}>{item.subdirectory}</span>}
+        {item.subdirectory && (
+          <span className="video-chip" style={getFolderChipStyle(item.subdirectory)} title={item.subdirectory}>
+            {item.subdirectory}
+          </span>
+        )}
         <p>{formatBytes(item.sizeBytes)}</p>
         <div className="video-card__actions">
           <button type="button" onClick={() => onReview(item.id)}>
@@ -194,7 +251,11 @@ function LibraryListItem({ item, onReview, onQuickAction }) {
       </div>
       <div className="video-list-item__body">
         <h3 title={item.baseName}>{item.baseName}</h3>
-        {item.subdirectory && <span className="video-chip" title={item.subdirectory}>{item.subdirectory}</span>}
+        {item.subdirectory && (
+          <span className="video-chip" style={getFolderChipStyle(item.subdirectory)} title={item.subdirectory}>
+            {item.subdirectory}
+          </span>
+        )}
         <p>{formatBytes(item.sizeBytes)}</p>
       </div>
       <div className="video-list-item__status">
@@ -303,22 +364,64 @@ function FilterView({
   currentId,
   onSelect,
   onDecision,
+  onMoveCurrent,
   scope,
   onScopeChange,
   folder,
   onFolderChange,
   folderOptions,
+  moveFolderOptions,
   skipSeconds,
+  shortcuts,
+  onMoveToCustomFolder,
   onRefresh,
 }) {
   const videoRef = useRef(null);
   const lastPRef = useRef(0);
   const saveTickRef = useRef(0);
   const [showQueueCards, setShowQueueCards] = useState(false);
+  const [moveTargetFolder, setMoveTargetFolder] = useState('__root__');
+  const [customFolderName, setCustomFolderName] = useState('');
   const current = useMemo(() => queue.find((item) => item.id === currentId) || queue[0] || null, [queue, currentId]);
   const currentIndex = current ? queue.findIndex((item) => item.id === current.id) : -1;
   const previous = currentIndex > 0 ? queue[currentIndex - 1] : null;
   const next = currentIndex >= 0 ? queue[currentIndex + 1] : null;
+  const currentFolderTag = current?.subdirectory || '__root__';
+  const mergedMoveFolderOptions = useMemo(() => {
+    const map = new Map();
+    map.set('__root__', 'Root folder');
+
+    for (const option of moveFolderOptions || []) {
+      if (option?.value && option.value !== 'all') {
+        map.set(option.value, option.label || option.value);
+      }
+    }
+
+    return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
+  }, [moveFolderOptions]);
+  const folderMoveShortcutEntries = useMemo(
+    () => Object.entries(shortcuts.folderMoves || {}),
+    [shortcuts]
+  );
+
+  useEffect(() => {
+    if (!current) {
+      return;
+    }
+
+    if (!mergedMoveFolderOptions.length) {
+      setMoveTargetFolder('__root__');
+      return;
+    }
+
+    const isValid = mergedMoveFolderOptions.some((option) => option.value === moveTargetFolder);
+    if (isValid) {
+      return;
+    }
+
+    const fallback = mergedMoveFolderOptions.find((option) => option.value !== currentFolderTag)?.value || '__root__';
+    setMoveTargetFolder(fallback);
+  }, [current, currentFolderTag, mergedMoveFolderOptions, moveTargetFolder]);
 
   const togglePlayPause = () => {
     if (!videoRef.current) return;
@@ -340,32 +443,32 @@ function FilterView({
         return;
       }
 
-      const key = event.key.toLowerCase();
-      if (key === 'k') {
+      const key = normalizeShortcut(event.key);
+      if (key === normalizeShortcut(shortcuts.keep)) {
         event.preventDefault();
         await onDecision(current.id, 'kept');
       }
-      if (key === 'arrowleft' && previous) {
+      if (key === normalizeShortcut(shortcuts.previous) && previous) {
         event.preventDefault();
         onSelect(previous.id);
       }
-      if (key === 'arrowright' && next) {
+      if (key === normalizeShortcut(shortcuts.next) && next) {
         event.preventDefault();
         onSelect(next.id);
       }
-      if (key === 's' && videoRef.current) {
+      if (key === normalizeShortcut(shortcuts.playPause) && videoRef.current) {
         event.preventDefault();
         togglePlayPause();
       }
-      if (key === 'a' && videoRef.current) {
+      if (key === normalizeShortcut(shortcuts.seekBack) && videoRef.current) {
         event.preventDefault();
         videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - skipSeconds);
       }
-      if (key === 'd' && videoRef.current) {
+      if (key === normalizeShortcut(shortcuts.seekForward) && videoRef.current) {
         event.preventDefault();
         videoRef.current.currentTime += skipSeconds;
       }
-      if (key === 'p') {
+      if (key === normalizeShortcut(shortcuts.trash)) {
         const now = Date.now();
         if (now - lastPRef.current < 700) {
           event.preventDefault();
@@ -375,11 +478,36 @@ function FilterView({
           lastPRef.current = now;
         }
       }
+      if (key === normalizeShortcut(shortcuts.moveCurrent) && current && moveTargetFolder !== currentFolderTag) {
+        event.preventDefault();
+        await onMoveCurrent(current.id, moveTargetFolder);
+      }
+
+      for (const [targetFolder, shortcutKey] of folderMoveShortcutEntries) {
+        if (!shortcutKey) continue;
+        if (key === normalizeShortcut(shortcutKey) && currentFolderTag !== targetFolder) {
+          event.preventDefault();
+          await onMoveCurrent(current.id, targetFolder);
+          break;
+        }
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [current, next, onDecision, onSelect, previous, skipSeconds]);
+  }, [
+    current,
+    currentFolderTag,
+    folderMoveShortcutEntries,
+    moveTargetFolder,
+    next,
+    onDecision,
+    onMoveCurrent,
+    onSelect,
+    previous,
+    shortcuts,
+    skipSeconds,
+  ]);
 
   useEffect(() => {
     if (videoRef.current && current) {
@@ -428,6 +556,17 @@ function FilterView({
           <h2 className="filter-header-title" title={current?.filename || 'No video selected'}>
             {current?.filename || 'No video selected'}
           </h2>
+          <div className="filter-header-meta">
+            <span
+              className="video-chip"
+              style={getFolderChipStyle(currentFolderTag)}
+              title={currentFolderTag === '__root__' ? 'Root folder' : currentFolderTag}
+            >
+              {currentFolderTag === '__root__' ? 'Root folder' : currentFolderTag}
+            </span>
+            <span className="pill">Size {formatBytes(current?.sizeBytes || 0)}</span>
+            <span className="pill">{queue.length} videos in queue</span>
+          </div>
         </div>
         <div className="toolbar toolbar--wrap">
           <select value={scope} onChange={(event) => onScopeChange(event.target.value)}>
@@ -442,14 +581,44 @@ function FilterView({
             ))}
           </select>
           <button type="button" className="ghost-button" onClick={onRefresh}>Refresh queue</button>
+          <select value={moveTargetFolder} onChange={(event) => setMoveTargetFolder(event.target.value)}>
+            {mergedMoveFolderOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
           <button
             type="button"
             className="ghost-button"
+            disabled={!current || moveTargetFolder === currentFolderTag}
+            onClick={() => current && onMoveCurrent(current.id, moveTargetFolder)}
+          >
+            Move current
+          </button>
+          <input
+            value={customFolderName}
+            onChange={(event) => setCustomFolderName(event.target.value)}
+            placeholder="New folder under root"
+          />
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!current || !customFolderName.trim()}
+            onClick={async () => {
+              if (!current) return;
+              await onMoveToCustomFolder(current.id, customFolderName.trim());
+              setCustomFolderName('');
+            }}
+          >
+            Create + move
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            style={{display:'none'}}
             onClick={() => setShowQueueCards((value) => !value)}
           >
             Queue cards {showQueueCards ? 'On' : 'Off'}
           </button>
-          <span className="pill">{queue.length} videos in queue</span>
         </div>
       </header>
 
@@ -477,7 +646,7 @@ function FilterView({
                 disabled={!previous}
                 onClick={() => previous && onSelect(previous.id)}
               >
-                Previous
+                {'<'}
               </button>
               <button
                 type="button"
@@ -485,21 +654,25 @@ function FilterView({
                 disabled={!next}
                 onClick={() => next && onSelect(next.id)}
               >
-                Next
+                {'>'}
               </button>
-              <div className="theater__caption">
-                <h3>{current.baseName}</h3>
-                <p>{formatBytes(current.sizeBytes)} · {current.decision}</p>
-              </div>
             </div>
           </div>
 
           <div className="decision-bar">
-            <button type="button" onClick={() => onDecision(current.id, 'kept')}>Keep <span>(K)</span></button>
-            <button type="button" onClick={() => onDecision(current.id, 'trashed')}>Delete to trash <span>(P P)</span></button>
-            <button type="button" onClick={() => videoRef.current && (videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - skipSeconds))}>-{skipSeconds}s <span>(A)</span></button>
-            <button type="button" onClick={() => videoRef.current && (videoRef.current.currentTime += skipSeconds)}>+{skipSeconds}s <span>(D)</span></button>
-            <button type="button" onClick={togglePlayPause}>Play/Pause <span>(S)</span></button>
+            <button type="button" onClick={() => onDecision(current.id, 'kept')}>Keep <span>({formatShortcutLabel(shortcuts.keep)})</span></button>
+            <button type="button" onClick={() => onDecision(current.id, 'trashed')}>Delete to trash <span>({formatShortcutLabel(shortcuts.trash)} {formatShortcutLabel(shortcuts.trash)})</span></button>
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={moveTargetFolder === currentFolderTag}
+              onClick={() => onMoveCurrent(current.id, moveTargetFolder)}
+            >
+              Move to selected folder <span>({formatShortcutLabel(shortcuts.moveCurrent)})</span>
+            </button>
+            <button type="button" onClick={() => videoRef.current && (videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - skipSeconds))}>-{skipSeconds}s <span>({formatShortcutLabel(shortcuts.seekBack)})</span></button>
+            <button type="button" onClick={() => videoRef.current && (videoRef.current.currentTime += skipSeconds)}>+{skipSeconds}s <span>({formatShortcutLabel(shortcuts.seekForward)})</span></button>
+            <button type="button" onClick={togglePlayPause}>Play/Pause <span>({formatShortcutLabel(shortcuts.playPause)})</span></button>
           </div>
 
           {showQueueCards && (
@@ -578,7 +751,7 @@ function TrashView({ items, onRestore, onPermanentDelete, onPermanentDeleteAll }
   );
 }
 
-function SettingsView({ branding, settingsDraft, onChange, onSave, onScan, scanStatus, scanProgress }) {
+function SettingsView({ branding, settingsDraft, onChange, onShortcutChange, onSave, onScan, scanStatus, scanProgress }) {
   const percent = scanProgress.total > 0
     ? Math.min(100, Math.round((scanProgress.added / scanProgress.total) * 100))
     : 0;
@@ -613,6 +786,48 @@ function SettingsView({ branding, settingsDraft, onChange, onSave, onScan, scanS
             ))}
           </select>
         </label>
+        <label>
+          <span>Shortcut: Keep</span>
+          <input value={settingsDraft.shortcuts.keep} onChange={(event) => onShortcutChange('keep', event.target.value)} placeholder="k" />
+        </label>
+        <label>
+          <span>Shortcut: Trash (double press)</span>
+          <input value={settingsDraft.shortcuts.trash} onChange={(event) => onShortcutChange('trash', event.target.value)} placeholder="p" />
+        </label>
+        <label>
+          <span>Shortcut: Move current video</span>
+          <input value={settingsDraft.shortcuts.moveCurrent} onChange={(event) => onShortcutChange('moveCurrent', event.target.value)} placeholder="m" />
+        </label>
+        <label>
+          <span>Shortcut: Play/Pause</span>
+          <input value={settingsDraft.shortcuts.playPause} onChange={(event) => onShortcutChange('playPause', event.target.value)} placeholder="s" />
+        </label>
+        <label>
+          <span>Shortcut: Seek Back</span>
+          <input value={settingsDraft.shortcuts.seekBack} onChange={(event) => onShortcutChange('seekBack', event.target.value)} placeholder="a" />
+        </label>
+        <label>
+          <span>Shortcut: Seek Forward</span>
+          <input value={settingsDraft.shortcuts.seekForward} onChange={(event) => onShortcutChange('seekForward', event.target.value)} placeholder="d" />
+        </label>
+        <label>
+          <span>Shortcut: Previous Video</span>
+          <input value={settingsDraft.shortcuts.previous} onChange={(event) => onShortcutChange('previous', event.target.value)} placeholder="ArrowLeft" />
+        </label>
+        <label>
+          <span>Shortcut: Next Video</span>
+          <input value={settingsDraft.shortcuts.next} onChange={(event) => onShortcutChange('next', event.target.value)} placeholder="ArrowRight" />
+        </label>
+        {Object.entries(settingsDraft.shortcuts.folderMoves || {}).map(([folderName, shortcutValue]) => (
+          <label key={folderName}>
+            <span>Move to: {folderName === '__root__' ? 'Root folder' : folderName}</span>
+            <input
+              value={shortcutValue}
+              onChange={(event) => onShortcutChange(`folderMoves.${folderName}`, event.target.value)}
+              placeholder="Optional key"
+            />
+          </label>
+        ))}
       </div>
 
       <div className="settings-actions">
@@ -641,8 +856,8 @@ export default function App() {
   const initialUrlState = getUrlState();
   const [branding, setBranding] = useState({ appName: 'ReelSort', appTagline: '' });
   const [activeTab, setActiveTab] = useState(initialUrlState.tab);
-  const [settings, setSettings] = useState({ mediaPath: '', skipSeconds: 10, filterScope: 'pending' });
-  const [settingsDraft, setSettingsDraft] = useState({ mediaPath: '', skipSeconds: 10, filterScope: 'pending' });
+  const [settings, setSettings] = useState({ mediaPath: '', skipSeconds: 10, filterScope: 'pending', shortcuts: mergeShortcuts() });
+  const [settingsDraft, setSettingsDraft] = useState({ mediaPath: '', skipSeconds: 10, filterScope: 'pending', shortcuts: mergeShortcuts() });
   const [stats, setStats] = useState({ total: 0, pending: 0, kept: 0, trashed: 0, sizeBytes: 0 });
   const [videos, setVideos] = useState([]);
   const [nextOffset, setNextOffset] = useState(0);
@@ -657,6 +872,7 @@ export default function App() {
   const [queueScope, setQueueScope] = useState(initialUrlState.queueScope);
   const [queueFolder, setQueueFolder] = useState(initialUrlState.queueFolder);
   const [queueFolderOptions, setQueueFolderOptions] = useState([]);
+  const [queueMoveFolderOptions, setQueueMoveFolderOptions] = useState([]);
   const [currentFilterId, setCurrentFilterId] = useState(initialUrlState.currentFilterId);
   const [trash, setTrash] = useState([]);
   const [scanStatus, setScanStatus] = useState('');
@@ -710,6 +926,29 @@ export default function App() {
         ? response.folderCounts
         : (Array.isArray(response.folders) ? response.folders.map((tag) => ({ tag, count: 0 })) : []);
       setQueueFolderOptions(toFolderOptions(folderCounts));
+      const allFolders = Array.isArray(response.allFolders) ? response.allFolders : [];
+      setQueueMoveFolderOptions(toMoveFolderOptions(allFolders));
+
+      setSettings((current) => ({
+        ...current,
+        shortcuts: mergeShortcuts({
+          ...current.shortcuts,
+          folderMoves: {
+            ...Object.fromEntries(allFolders.map((tag) => [tag, current.shortcuts?.folderMoves?.[tag] || ''])),
+          },
+        }),
+      }));
+
+      setSettingsDraft((current) => ({
+        ...current,
+        shortcuts: mergeShortcuts({
+          ...current.shortcuts,
+          folderMoves: {
+            ...Object.fromEntries(allFolders.map((tag) => [tag, current.shortcuts?.folderMoves?.[tag] || ''])),
+          },
+        }),
+      }));
+
       const fallbackId = response.items.find((item) => item.id === preferredId)?.id ?? response.items[0]?.id ?? null;
       setCurrentFilterId(fallbackId);
     } catch (error) {
@@ -733,8 +972,12 @@ export default function App() {
         api.getSettings(),
       ]);
       setBranding(brandingResponse);
-      setSettings(settingsResponse);
-      setSettingsDraft(settingsResponse);
+      const mergedSettings = {
+        ...settingsResponse,
+        shortcuts: mergeShortcuts(settingsResponse.shortcuts || {}),
+      };
+      setSettings(mergedSettings);
+      setSettingsDraft(mergedSettings);
       const preferredQueueScope = initialUrlState.hasQueueScope ? queueScope : (settingsResponse.filterScope || 'pending');
       setQueueScope(preferredQueueScope);
       await Promise.all([
@@ -818,11 +1061,16 @@ export default function App() {
         mediaPath: settingsDraft.mediaPath,
         skipSeconds: Number(settingsDraft.skipSeconds),
         filterScope: settingsDraft.filterScope,
+        shortcuts: settingsDraft.shortcuts,
       });
-      setSettings(saved);
-      setSettingsDraft(saved);
+      const mergedSettings = {
+        ...saved,
+        shortcuts: mergeShortcuts(saved.shortcuts || {}),
+      };
+      setSettings(mergedSettings);
+      setSettingsDraft(mergedSettings);
       setFlash('Settings saved.');
-      await loadQueue(saved.filterScope, queueFolder, currentFilterId);
+      await loadQueue(mergedSettings.filterScope, queueFolder, currentFilterId);
     } catch (error) {
       setFlash(error.message);
     }
@@ -900,6 +1148,36 @@ export default function App() {
         loadQueue(queueScope, queueFolder, currentFilterId),
         loadTrash(),
       ]);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  async function handleMoveCurrentVideo(id, targetFolder) {
+    try {
+      await api.moveVideo(id, targetFolder);
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, queueFolder, id),
+        loadTrash(),
+      ]);
+      setFlash('Video moved.');
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  async function handleMoveCurrentVideoToCustomFolder(id, customFolderName) {
+    try {
+      await api.moveVideo(id, customFolderName);
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, queueFolder, id),
+        loadTrash(),
+      ]);
+      setFlash(`Video moved to ${customFolderName}.`);
     } catch (error) {
       setFlash(error.message);
     }
@@ -988,6 +1266,7 @@ export default function App() {
             currentId={currentFilterId}
             onSelect={setCurrentFilterId}
             onDecision={handleDecision}
+            onMoveCurrent={handleMoveCurrentVideo}
             scope={queueScope}
             onScopeChange={(value) => {
               setQueueScope(value);
@@ -999,7 +1278,10 @@ export default function App() {
               loadQueue(queueScope, value, currentFilterId);
             }}
             folderOptions={queueFolderOptions}
+            moveFolderOptions={queueMoveFolderOptions}
             skipSeconds={Number(settings.skipSeconds) || 10}
+            shortcuts={settings.shortcuts || DEFAULT_SHORTCUTS}
+            onMoveToCustomFolder={handleMoveCurrentVideoToCustomFolder}
             onRefresh={() => loadQueue(queueScope, queueFolder, currentFilterId)}
           />
         )}
@@ -1018,6 +1300,27 @@ export default function App() {
             branding={branding}
             settingsDraft={settingsDraft}
             onChange={(key, value) => setSettingsDraft((current) => ({ ...current, [key]: value }))}
+            onShortcutChange={(key, value) => setSettingsDraft((current) => ({
+              ...current,
+              shortcuts: (() => {
+                const shortcuts = mergeShortcuts(current.shortcuts || {});
+                if (key.startsWith('folderMoves.')) {
+                  const folderName = key.slice('folderMoves.'.length);
+                  return {
+                    ...shortcuts,
+                    folderMoves: {
+                      ...shortcuts.folderMoves,
+                      [folderName]: value,
+                    },
+                  };
+                }
+
+                return {
+                  ...shortcuts,
+                  [key]: value,
+                };
+              })(),
+            }))}
             onSave={handleSaveSettings}
             onScan={handleScan}
             scanStatus={scanStatus}
