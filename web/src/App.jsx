@@ -72,6 +72,16 @@ function formatShortcutLabel(value) {
   return String(value || '').trim() || 'Unassigned';
 }
 
+function ActionButton({ icon, label, shortcut, className = '', ...props }) {
+  return (
+    <button type="button" className={className} {...props}>
+      <span className="button-icon" aria-hidden="true">{icon}</span>
+      <span className="button-label">{label}</span>
+      {shortcut && <span className="button-shortcut">{shortcut}</span>}
+    </button>
+  );
+}
+
 function toMoveFolderOptions(folderTags = []) {
   return folderTags.map((tag) => ({
     value: tag,
@@ -580,27 +590,27 @@ function FilterView({
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
-          <button type="button" className="ghost-button" onClick={onRefresh}>Refresh queue</button>
+          <ActionButton icon="↻" label="Refresh queue" className="ghost-button" onClick={onRefresh} />
           <select value={moveTargetFolder} onChange={(event) => setMoveTargetFolder(event.target.value)}>
             {mergedMoveFolderOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
-          <button
-            type="button"
+          <ActionButton
+            icon="📁"
+            label="Move current"
             className="ghost-button"
             disabled={!current || moveTargetFolder === currentFolderTag}
             onClick={() => current && onMoveCurrent(current.id, moveTargetFolder)}
-          >
-            Move current
-          </button>
+          />
           <input
             value={customFolderName}
             onChange={(event) => setCustomFolderName(event.target.value)}
             placeholder="New folder under root"
           />
-          <button
-            type="button"
+          <ActionButton
+            icon="✚"
+            label="Create + move"
             className="ghost-button"
             disabled={!current || !customFolderName.trim()}
             onClick={async () => {
@@ -608,17 +618,15 @@ function FilterView({
               await onMoveToCustomFolder(current.id, customFolderName.trim());
               setCustomFolderName('');
             }}
-          >
-            Create + move
-          </button>
-          <button
-            type="button"
+          />
+          <ActionButton
+            icon="🗂"
+            // intentionally hidden
+            style={{ display: 'none' }} 
+            label={`Queue cards ${showQueueCards ? 'On' : 'Off'}`}
             className="ghost-button"
-            style={{display:'none'}}
             onClick={() => setShowQueueCards((value) => !value)}
-          >
-            Queue cards {showQueueCards ? 'On' : 'Off'}
-          </button>
+          />
         </div>
       </header>
 
@@ -660,19 +668,19 @@ function FilterView({
           </div>
 
           <div className="decision-bar">
-            <button type="button" onClick={() => onDecision(current.id, 'kept')}>Keep <span>({formatShortcutLabel(shortcuts.keep)})</span></button>
-            <button type="button" onClick={() => onDecision(current.id, 'trashed')}>Delete to trash <span>({formatShortcutLabel(shortcuts.trash)} {formatShortcutLabel(shortcuts.trash)})</span></button>
-            <button
-              type="button"
+            <ActionButton icon="✅" label="Keep" shortcut={formatShortcutLabel(shortcuts.keep)} onClick={() => onDecision(current.id, 'kept')} />
+            <ActionButton icon="🗑" label="Delete to trash" shortcut={`${formatShortcutLabel(shortcuts.trash)} ${formatShortcutLabel(shortcuts.trash)}`} onClick={() => onDecision(current.id, 'trashed')} />
+            <ActionButton
+              icon="📂"
+              label="Move to selected folder"
+              shortcut={formatShortcutLabel(shortcuts.moveCurrent)}
               className="ghost-button"
               disabled={moveTargetFolder === currentFolderTag}
               onClick={() => onMoveCurrent(current.id, moveTargetFolder)}
-            >
-              Move to selected folder <span>({formatShortcutLabel(shortcuts.moveCurrent)})</span>
-            </button>
-            <button type="button" onClick={() => videoRef.current && (videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - skipSeconds))}>-{skipSeconds}s <span>({formatShortcutLabel(shortcuts.seekBack)})</span></button>
-            <button type="button" onClick={() => videoRef.current && (videoRef.current.currentTime += skipSeconds)}>+{skipSeconds}s <span>({formatShortcutLabel(shortcuts.seekForward)})</span></button>
-            <button type="button" onClick={togglePlayPause}>Play/Pause <span>({formatShortcutLabel(shortcuts.playPause)})</span></button>
+            />
+            <ActionButton icon="⏪" label={`-${skipSeconds}s`} shortcut={formatShortcutLabel(shortcuts.seekBack)} onClick={() => videoRef.current && (videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - skipSeconds))} />
+            <ActionButton icon="⏩" label={`+${skipSeconds}s`} shortcut={formatShortcutLabel(shortcuts.seekForward)} onClick={() => videoRef.current && (videoRef.current.currentTime += skipSeconds)} />
+            <ActionButton icon="⏯" label="Play/Pause" shortcut={formatShortcutLabel(shortcuts.playPause)} onClick={togglePlayPause} />
           </div>
 
           {showQueueCards && (
@@ -1005,7 +1013,8 @@ export default function App() {
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
-    if (activeTab === 'filter') {
+    const isMobileLayout = window.matchMedia('(max-width: 760px)').matches;
+    if (activeTab === 'filter' && !isMobileLayout) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
