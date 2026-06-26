@@ -334,6 +334,24 @@ select {
   justify-content: flex-end;
 }
 
+.button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+.button-label,
+.button-shortcut {
+  white-space: nowrap;
+}
+
+.button-shortcut {
+  opacity: 0.78;
+  font-size: 0.8em;
+}
+
 .toolbar--wrap {
   flex-wrap: wrap;
   width: 100%;
@@ -865,6 +883,11 @@ select {
     padding: 14px;
   }
 
+  .main-stage--filter {
+    height: auto;
+    overflow: visible;
+  }
+
   .sidebar,
   .panel,
   .floating-header {
@@ -889,6 +912,79 @@ select {
   .trash-item__actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .toolbar button,
+  .decision-bar button,
+  .toolbar .ghost-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .button-label,
+  .button-shortcut {
+    display: none;
+  }
+
+  .button-icon {
+    font-size: 1.15rem;
+  }
+
+  .panel--filter {
+    height: auto;
+    overflow: visible;
+  }
+
+  .panel--filter .theater {
+    flex: none;
+    min-height: 0;
+  }
+
+  .panel--filter .theater__stage {
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .panel--filter .theater__video {
+    max-height: 38vh;
+  }
+
+  .panel--filter .theater__overlay-nav {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 0.75rem;
+  }
+
+  .filter-header-main {
+    gap: 10px;
+  }
+
+  .filter-header-title {
+    font-size: 1.25rem;
+  }
+
+  .filter-header-meta {
+    gap: 6px;
+  }
+
+  .toolbar input,
+  .toolbar select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .queue-strip {
+    grid-auto-columns: 84px;
+    margin-top: 14px;
+  }
+
+  .toolbar input,
+  .toolbar select,
+  .toolbar button {
+    width: 100%;
+    min-width: 0;
   }
 
   .video-list-item {
