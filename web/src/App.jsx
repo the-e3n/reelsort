@@ -646,6 +646,8 @@ function FilterView({
                 src={current.videoUrl}
                 poster={current.posterUrl || undefined}
                 controls
+                playsInline
+                preload="metadata"
                 autoPlay
               />
               <button
