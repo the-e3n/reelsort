@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 
-const TABS = ['library', 'filter', 'trash', 'settings'];
+const TABS = ['library', 'filter', 'trash', 'settings', 'convert'];
 const FILTER_OPTIONS = [
   { value: 'active', label: 'All active' },
   { value: 'pending', label: 'Undecided' },
@@ -47,6 +47,132 @@ function getUrlState() {
     queueFolder: queueFolder || 'all',
     currentFilterId: Number.isFinite(videoId) ? videoId : null,
   };
+}
+
+function ConversionView({ branding, convertFolders, convertFolder, onConvertFolderChange, onConvertStart, onConvertStop, convertProgress, convertStatus, convertHistory, onRetry, settingsDraft, onChange, onSave }) {
+  return (
+    <section className="panel settings-panel">
+      <header className="panel__header">
+        <div>
+          <span className="eyebrow">Conversion</span>
+          <h2>Convert videos to audio</h2>
+        </div>
+      </header>
+
+      <div className="settings-grid">
+        <label>
+          <span>Convert format</span>
+          <select value={settingsDraft?.converter?.format || 'mp3'} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), format: e.target.value })}>
+            <option value="mp3">MP3</option>
+            <option value="m4a">M4A</option>
+          </select>
+        </label>
+        <label>
+          <span>Quality / Bitrate</span>
+          <input value={settingsDraft?.converter?.quality || '192k'} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), quality: e.target.value })} />
+        </label>
+        <label>
+          <span>Output location</span>
+          <select value={settingsDraft?.converter?.output || 'sidecar'} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), output: e.target.value })}>
+            <option value="sidecar">Same folder (sidecar)</option>
+            <option value="server">Server folder</option>
+          </select>
+        </label>
+        {settingsDraft?.converter?.output === 'server' && (
+          <label>
+            <span>Server output folder (relative)</span>
+            <input value={settingsDraft?.converter?.outputPath || 'server/data/audio'} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), outputPath: e.target.value })} placeholder="server/data/audio" />
+          </label>
+        )}
+        <label className="label--inline">
+          <input type="checkbox" checked={Boolean(settingsDraft?.converter?.hwAccel)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), hwAccel: e.target.checked })} />
+          <span>Use hardware acceleration</span>
+        </label>
+        <label className="label--inline">
+          <input type="checkbox" checked={Boolean(settingsDraft?.converter?.copyIfPossible)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), copyIfPossible: e.target.checked })} />
+          <span>Copy audio if possible</span>
+        </label>
+        <label>
+          <span>Concurrency</span>
+          <input type="number" min={1} value={Number(settingsDraft?.converter?.concurrency || 1)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), concurrency: Number(e.target.value) || 1 })} />
+        </label>
+        <label>
+          <span>Retries</span>
+          <input type="number" min={0} value={Number(settingsDraft?.converter?.retryCount || 1)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), retryCount: Number(e.target.value) || 0 })} />
+        </label>
+      </div>
+
+      <div className="settings-actions">
+        <button type="button" onClick={onSave}>Save settings</button>
+      </div>
+
+      <div className="settings-grid">
+        <label>
+          <span>Folder to convert</span>
+          <select value={convertFolder} onChange={(e) => onConvertFolderChange(e.target.value)}>
+            <option value="all">All folders</option>
+            {convertFolders.map((f) => (
+              <option key={f.value} value={f.value}>{f.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="settings-actions">
+        <button type="button" onClick={onConvertStart}>Start conversion</button>
+        <button type="button" className="ghost-button" onClick={() => onConvertStop && onConvertStop()}>Stop</button>
+      </div>
+
+      {(convertProgress?.running || convertProgress?.total > 0) && (
+        <div className="scan-progress" aria-live="polite">
+          <div className="scan-progress__label">
+            <span>Converting</span>
+            <strong>{convertProgress.processed}/{convertProgress.total || 0}</strong>
+          </div>
+          <div className="scan-progress__track" role="progressbar" aria-valuemin={0} aria-valuemax={convertProgress.total || 0} aria-valuenow={convertProgress.processed}>
+            <div className="scan-progress__fill" style={{ width: `${convertProgress.total ? Math.round((convertProgress.processed / convertProgress.total) * 100) : 0}%` }} />
+          </div>
+          <div className="panel__notice">{convertStatus}</div>
+          <div>
+            {Object.entries(convertProgress.perFile || {}).map(([id, info]) => (
+              <div key={id} style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                <div>{info.status} {Math.round(info.percent || 0)}% {info.seconds ? `(${Math.round(info.seconds)}s)` : ''}</div>
+                {info.status === 'error' && (
+                  <div>
+                    <button type="button" onClick={() => onRetry(Number(id))}>Retry</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <hr />
+
+      <header className="panel__header">
+        <div>
+          <span className="eyebrow">History</span>
+          <h2>Recent conversions</h2>
+        </div>
+      </header>
+
+      <div className="panel__notice">
+        {(!convertHistory || convertHistory.length === 0) ? (
+          <div>No conversions yet.</div>
+        ) : (
+          <div className="history-list">
+            {convertHistory.map((h) => (
+              <div key={h.timestamp} className="history-item">
+                <div>{new Date(h.timestamp).toLocaleString()} — {h.status} — {h.input ? h.input.split('/').pop() : ''}</div>
+                {h.status === 'error' && <div className="history-error">{h.error}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function formatBytes(bytes) {
@@ -761,7 +887,7 @@ function TrashView({ items, onRestore, onPermanentDelete, onPermanentDeleteAll }
   );
 }
 
-function SettingsView({ branding, settingsDraft, onChange, onShortcutChange, onSave, onScan, scanStatus, scanProgress }) {
+function SettingsView({ branding, settingsDraft, onChange, onShortcutChange, onSave, onScan, scanStatus, scanProgress, convertFolders, convertFolder, onConvertFolderChange, onConvertStart, convertProgress, convertStatus }) {
   const percent = scanProgress.total > 0
     ? Math.min(100, Math.round((scanProgress.added / scanProgress.total) * 100))
     : 0;
@@ -858,6 +984,52 @@ function SettingsView({ branding, settingsDraft, onChange, onShortcutChange, onS
       )}
 
       {scanStatus && <div className="panel__notice">{scanStatus}</div>}
+
+      
+
+      <hr />
+
+      <header className="panel__header">
+        <div>
+          <span className="eyebrow">Conversion</span>
+          <h2>Convert folder videos to audio</h2>
+        </div>
+      </header>
+
+      <div className="settings-grid">
+        <label>
+          <span>Folder to convert</span>
+          <select value={convertFolder} onChange={(e) => onConvertFolderChange(e.target.value)}>
+            <option value="all">All folders</option>
+            {convertFolders.map((f) => (
+              <option key={f.value} value={f.value}>{f.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="settings-actions">
+        <button type="button" onClick={onConvertStart}>Start conversion</button>
+        <button type="button" className="ghost-button" onClick={() => onConvertStop && onConvertStop()}>Stop</button>
+      </div>
+
+      {(convertProgress?.running || convertProgress?.total > 0) && (
+        <div className="scan-progress" aria-live="polite">
+          <div className="scan-progress__label">
+            <span>Converting</span>
+            <strong>{convertProgress.processed}/{convertProgress.total || 0}</strong>
+          </div>
+          <div className="scan-progress__track" role="progressbar" aria-valuemin={0} aria-valuemax={convertProgress.total || 0} aria-valuenow={convertProgress.processed}>
+            <div className="scan-progress__fill" style={{ width: `${convertProgress.total ? Math.round((convertProgress.processed / convertProgress.total) * 100) : 0}%` }} />
+          </div>
+          <div className="panel__notice">{convertStatus}</div>
+          <div>
+            {Object.entries(convertProgress.perFile || {}).map(([id, info]) => (
+              <div key={id}>{info.status} {Math.round(info.percent || 0)}% {info.seconds ? `(${Math.round(info.seconds)}s)` : ''}</div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -887,6 +1059,11 @@ export default function App() {
   const [trash, setTrash] = useState([]);
   const [scanStatus, setScanStatus] = useState('');
   const [scanProgress, setScanProgress] = useState({ running: false, added: 0, total: 0 });
+  const [convertFolders, setConvertFolders] = useState([]);
+  const [convertFolder, setConvertFolder] = useState('all');
+  const [convertProgress, setConvertProgress] = useState({ running: false, total: 0, processed: 0, perFile: {}, current: null });
+  const [convertStatus, setConvertStatus] = useState('');
+  const [convertHistory, setConvertHistory] = useState([]);
   const [flash, setFlash] = useState('');
 
   async function refreshStats() {
@@ -994,6 +1171,8 @@ export default function App() {
         refreshStats(),
         loadVideos({ reset: true, nextFilter: libraryFilter, nextSearch: search, nextFolder: libraryFolder }),
         loadQueue(preferredQueueScope, queueFolder, currentFilterId),
+        loadConvertFolders(),
+        loadConvertHistory(),
         loadTrash(),
       ]);
     } catch (error) {
@@ -1004,6 +1183,16 @@ export default function App() {
   useEffect(() => {
     bootstrap();
   }, []);
+
+  useEffect(() => {
+    // refresh history periodically when not running
+    let t = null;
+    if (!convertProgress.running) {
+      t = setInterval(() => loadConvertHistory(), 5000);
+    }
+
+    return () => { if (t) clearInterval(t); };
+  }, [convertProgress.running]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1073,6 +1262,7 @@ export default function App() {
         skipSeconds: Number(settingsDraft.skipSeconds),
         filterScope: settingsDraft.filterScope,
         shortcuts: settingsDraft.shortcuts,
+        converter: settingsDraft.converter,
       });
       const mergedSettings = {
         ...saved,
@@ -1131,6 +1321,81 @@ export default function App() {
     } catch (error) {
       setScanProgress((current) => ({ ...current, running: false }));
       setScanStatus(error.message);
+    }
+  }
+
+  async function loadConvertFolders() {
+    try {
+      const resp = await api.getConvertFolders();
+      const folderCounts = Array.isArray(resp.folderCounts) ? resp.folderCounts : [];
+      const options = folderCounts.map((item) => ({ value: item.tag, label: item.tag === '__root__' ? 'Root folder' : item.tag }));
+      setConvertFolders(options);
+      if (options.length) setConvertFolder(options[0].value);
+    } catch (error) {
+      // ignore
+    }
+  }
+
+  async function handleStartConvert() {
+    try {
+      setConvertStatus('Starting conversion…');
+      setConvertProgress((c) => ({ ...c, running: true }));
+      await api.startConvert({ folder: convertFolder });
+
+      while (true) {
+        const progress = await api.getConvertProgress();
+        setConvertProgress({ running: Boolean(progress.running), total: Number(progress.total) || 0, processed: Number(progress.processed) || 0, perFile: progress.perFile || {}, current: progress.current || null });
+        setConvertStatus(progress.running ? `Converting ${progress.processed}/${progress.total}` : `Conversion ${progress.processed}/${progress.total}`);
+
+        if (!progress.running) {
+          if (progress.error) {
+            setConvertStatus(`Error: ${progress.error}`);
+          }
+          break;
+        }
+
+        // poll
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      await Promise.all([refreshStats(), loadVideos({ reset: true }), loadQueue(queueScope, queueFolder, currentFilterId), loadTrash(), loadConvertFolders()]);
+      await loadConvertHistory();
+    } catch (error) {
+      setConvertStatus(error.message);
+      setConvertProgress((c) => ({ ...c, running: false }));
+    }
+  }
+
+  async function loadConvertHistory() {
+    try {
+      const resp = await api.getConvertHistory();
+      setConvertHistory(Array.isArray(resp.items) ? resp.items : []);
+    } catch (error) {
+      // ignore
+    }
+  }
+
+  async function handleStopConvert() {
+    try {
+      await api.stopConvert();
+      setConvertStatus('Stop requested.');
+      setConvertProgress((c) => ({ ...c, running: false }));
+      await loadConvertHistory();
+    } catch (error) {
+      setConvertStatus(error.message);
+    }
+  }
+
+  async function handleRetryConvert(videoId) {
+    try {
+      setConvertStatus(`Retrying ${videoId}…`);
+      await api.startConvert({ videoIds: [videoId] });
+      // poll once
+      await new Promise((r) => setTimeout(r, 500));
+      await loadConvertHistory();
+    } catch (error) {
+      setConvertStatus(error.message);
     }
   }
 
@@ -1336,6 +1601,29 @@ export default function App() {
             onScan={handleScan}
             scanStatus={scanStatus}
             scanProgress={scanProgress}
+            convertFolders={convertFolders}
+            convertFolder={convertFolder}
+            onConvertFolderChange={(v) => setConvertFolder(v)}
+            convertProgress={convertProgress}
+            convertStatus={convertStatus}
+          />
+        )}
+
+        {activeTab === 'convert' && (
+          <ConversionView
+            branding={branding}
+            convertFolders={convertFolders}
+            convertFolder={convertFolder}
+            onConvertFolderChange={(v) => setConvertFolder(v)}
+            onConvertStart={handleStartConvert}
+            onConvertStop={handleStopConvert}
+            convertProgress={convertProgress}
+            convertStatus={convertStatus}
+            convertHistory={convertHistory}
+            onRetry={handleRetryConvert}
+            settingsDraft={settingsDraft}
+            onChange={(key, value) => setSettingsDraft((current) => ({ ...current, [key]: value }))}
+            onSave={handleSaveSettings}
           />
         )}
       </main>

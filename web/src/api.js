@@ -36,6 +36,17 @@ export const api = {
     }),
   getScanProgress: () => request('/api/scan/progress'),
   getStats: () => request('/api/stats'),
+  getConvertFolders: () => request('/api/convert/folders'),
+  startConvert: (opts) =>
+    request('/api/convert', {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(opts),
+    }),
+  getConvertProgress: () => request('/api/convert/progress'),
+  stopConvert: () => request('/api/convert/stop', { method: 'POST' }),
+  getConvertQueue: () => request('/api/convert/queue'),
+  getConvertHistory: () => request('/api/convert/history'),
   getVideos: ({ offset = 0, limit = 30, search = '', filter = 'active', folder = 'all' }) =>
     request(
       `/api/videos?offset=${offset}&limit=${limit}&search=${encodeURIComponent(search)}&filter=${filter}&folder=${encodeURIComponent(folder)}`

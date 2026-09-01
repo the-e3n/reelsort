@@ -16,6 +16,16 @@ const defaults = {
     next: 'ArrowRight',
     folderMoves: {},
   },
+  converter: {
+    format: 'mp3',
+    quality: '192k',
+    output: 'sidecar',
+    outputPath: 'server/data/audio',
+    hwAccel: false,
+    concurrency: 1,
+    copyIfPossible: true,
+    retryCount: 1,
+  },
 };
 
 const getStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
@@ -49,6 +59,7 @@ export function getSettings() {
         ...(savedShortcuts.folderMoves || {}),
       },
     },
+    converter: getSetting('converter', defaults.converter),
   };
 }
 
@@ -72,6 +83,7 @@ export function updateSettings(next) {
       ...((merged.shortcuts || {}).folderMoves || {}),
     },
   });
+  setSetting('converter', merged.converter || defaults.converter);
 
   return getSettings();
 }

@@ -782,6 +782,25 @@ select {
   gap: 8px;
 }
 
+/* Inline label for checkboxes: place text and checkbox on same row */
+.settings-grid label.label--inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-grid label.label--inline input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0 8px 0 0;
+  box-sizing: border-box;
+}
+
+.settings-grid label.label--inline span {
+  order: 1;
+}
+
 .pill {
   display: inline-flex;
   padding: 0.6rem 0.85rem;

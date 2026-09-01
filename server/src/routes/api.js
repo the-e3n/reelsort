@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { BRANDING } from '../config/branding.js';
 import { DECISIONS, DEFAULT_PAGE_SIZE, FILTER_SCOPES } from '../config/constants.js';
 import {
@@ -24,6 +25,7 @@ import {
 } from '../services/fileActions.js';
 import { getScanProgress, scanMediaFolder, startScan } from '../services/mediaScanner.js';
 import { getSettings, updateSettings } from '../services/settingsService.js';
+import audioConverter from '../services/audioConverter.js';
 
 const router = express.Router();
 
@@ -50,6 +52,9 @@ router.post('/settings', (req, res) => {
   const shortcuts = typeof req.body.shortcuts === 'object' && req.body.shortcuts !== null
     ? req.body.shortcuts
     : undefined;
+  const converter = typeof req.body.converter === 'object' && req.body.converter !== null
+    ? req.body.converter
+    : undefined;
 
   const payload = {};
 
@@ -67,6 +72,10 @@ router.post('/settings', (req, res) => {
 
   if (shortcuts !== undefined) {
     payload.shortcuts = shortcuts;
+  }
+
+  if (converter !== undefined) {
+    payload.converter = converter;
   }
 
   const settings = updateSettings(payload);
@@ -98,6 +107,68 @@ router.get('/scan/progress', (_req, res) => {
 
 router.get('/stats', (_req, res) => {
   res.json(getStats());
+});
+
+router.get('/convert/folders', (_req, res) => {
+  try {
+    const folderCounts = getVideoFolderCounts({ filter: 'active' });
+    const folders = folderCounts.map((item) => item.tag);
+    res.json({ folders: folders, folderCounts });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to list folders.' });
+  }
+});
+
+router.post('/convert', (req, res, next) => {
+  try {
+    const videoIds = Array.isArray(req.body?.videoIds) ? req.body.videoIds.map((v) => Number(v)) : null;
+    const folder = typeof req.body?.folder === 'string' ? req.body.folder : undefined;
+    const arg = videoIds ? { videoIds, folder } : (folder !== undefined ? folder : undefined);
+    const progress = audioConverter.startConversion(arg);
+    res.status(202).json(progress);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/convert/progress', (_req, res) => {
+  try {
+    res.json(audioConverter.getConversionProgress());
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to get conversion progress.' });
+  }
+});
+
+router.post('/convert/stop', (_req, res) => {
+  try {
+    audioConverter.stopConversion();
+    res.json({ stopped: true });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to stop conversion.' });
+  }
+});
+
+router.get('/convert/queue', (_req, res) => {
+  try {
+    const progress = audioConverter.getConversionProgress();
+    res.json({ queue: progress.queue || [], current: progress.current || null });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to get queue.' });
+  }
+});
+
+router.get('/convert/history', async (_req, res) => {
+  try {
+    const historyPath = path.resolve(process.cwd(), 'server', 'data', 'conversion-history.jsonl');
+    const content = await fs.readFile(historyPath, 'utf8').catch(() => '');
+    const lines = content.split(/\r?\n/).filter(Boolean);
+    const items = lines.map((l) => {
+      try { return JSON.parse(l); } catch (e) { return null; }
+    }).filter(Boolean).reverse();
+    res.json({ items });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to read history.' });
+  }
 });
 
 router.get('/videos', (req, res) => {

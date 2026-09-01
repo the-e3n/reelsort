@@ -26,6 +26,7 @@ COPY --from=build /app/server/src server/src
 COPY --from=build /app/web/dist web/dist
 
 RUN mkdir -p /app/server/data
+RUN apk add --no-cache ffmpeg
 
 EXPOSE 4000
 VOLUME ["/app/server/data"]
