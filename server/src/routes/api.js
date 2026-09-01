@@ -121,11 +121,23 @@ router.get('/convert/folders', (_req, res) => {
 
 router.post('/convert', (req, res, next) => {
   try {
-    const videoIds = Array.isArray(req.body?.videoIds) ? req.body.videoIds.map((v) => Number(v)) : null;
-    const folder = typeof req.body?.folder === 'string' ? req.body.folder : undefined;
-    const arg = videoIds ? { videoIds, folder } : (folder !== undefined ? folder : undefined);
+    const videoIds = Array.isArray(req.body?.videoIds) ? req.body?.videoIds.map((v) => Number(v)) : null;
+    const folder = typeof req.body?.folder === 'string' ? req.body?.folder : undefined;
+    const outputPath = typeof req.body?.outputPath === 'string' ? req.body.outputPath : undefined;
+    const output = typeof req.body?.output === 'string' ? req.body.output : undefined;
+    const arg = videoIds ? { videoIds, folder, outputPath, output } : (folder !== undefined ? { folder, outputPath, output } : undefined);
     const progress = audioConverter.startConversion(arg);
     res.status(202).json(progress);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/convert/history/clear', async (_req, res, next) => {
+  try {
+    const historyPath = path.resolve(process.cwd(), 'server', 'data', 'conversion-history.jsonl');
+    await fs.writeFile(historyPath, '');
+    res.json({ cleared: true });
   } catch (error) {
     next(error);
   }

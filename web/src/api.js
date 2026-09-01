@@ -43,6 +43,10 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify(opts),
     }),
+  clearConvertHistory: () =>
+    request('/api/convert/history/clear', {
+      method: 'POST',
+    }),
   getConvertProgress: () => request('/api/convert/progress'),
   stopConvert: () => request('/api/convert/stop', { method: 'POST' }),
   getConvertQueue: () => request('/api/convert/queue'),

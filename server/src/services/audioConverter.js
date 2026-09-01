@@ -233,8 +233,11 @@ export async function startConversion(opts) {
   state.running = true;
   state.mediaPath = mediaPath;
 
-  // support startConversion(folder) or startConversion({ folder, videoIds })
+  // support startConversion(folder) or startConversion({ folder, videoIds, outputPath, output })
+  // if opts is a string treat it as folder
   let videos = [];
+  let jobOutputPath = undefined;
+  let jobOutputMode = undefined;
   if (typeof opts === 'string') {
     state.folder = opts || 'all';
     const videosResult = getVideos({ offset: 0, limit: 1000000, filter: 'active', folder: state.folder || 'all' });
@@ -242,10 +245,14 @@ export async function startConversion(opts) {
   } else if (opts && Array.isArray(opts.videoIds)) {
     state.folder = opts.folder || null;
     videos = opts.videoIds.map((id) => getVideoById(Number(id))).filter(Boolean);
+    jobOutputPath = typeof opts.outputPath === 'string' ? opts.outputPath : undefined;
+    jobOutputMode = typeof opts.output === 'string' ? opts.output : undefined;
   } else {
     state.folder = (opts && opts.folder) || 'all';
     const videosResult = getVideos({ offset: 0, limit: 1000000, filter: 'active', folder: state.folder || 'all' });
     videos = videosResult.items || [];
+    jobOutputPath = typeof (opts && opts.outputPath) === 'string' ? opts.outputPath : undefined;
+    jobOutputMode = typeof (opts && opts.output) === 'string' ? opts.output : undefined;
   }
 
   state.queue = videos;
@@ -258,19 +265,21 @@ export async function startConversion(opts) {
       const concurrency = Math.max(1, Number(conv.concurrency) || 1);
 
       // ensure server output dir if needed (support custom outputPath)
-      // If `conv.outputPath` is relative, resolve it relative to the configured `mediaPath`
-      // so outputs land under the media root instead of the project root.
+      // Determine job-specific output mode/path; fall back to global settings
+      const jobOutput = jobOutputMode || conv.output || 'sidecar';
+      const jobOutputPathFinal = (typeof jobOutputPath === 'string' && jobOutputPath.trim() !== '') ? jobOutputPath.trim() : (typeof conv.outputPath === 'string' ? conv.outputPath : '');
+
+      // If server mode, resolve output path relative to mediaPath when relative
       let serverBaseDir = path.resolve(process.cwd(), 'server', 'data', 'audio');
-      if (conv.outputPath && typeof conv.outputPath === 'string' && conv.outputPath.trim() !== '') {
-        const candidate = conv.outputPath.trim();
-        if (path.isAbsolute(candidate)) {
-          serverBaseDir = path.resolve(candidate);
-        } else {
-          // prefer resolving relative to mediaPath so output is colocated with media
-          serverBaseDir = path.resolve(mediaPath, candidate);
+      if (jobOutput === 'server') {
+        if (jobOutputPathFinal && jobOutputPathFinal.trim() !== '') {
+          const candidate = jobOutputPathFinal.trim();
+          if (path.isAbsolute(candidate)) {
+            serverBaseDir = path.resolve(candidate);
+          } else {
+            serverBaseDir = path.resolve(mediaPath, candidate);
+          }
         }
-      }
-      if (conv.output === 'server') {
         await fs.mkdir(serverBaseDir, { recursive: true });
       }
 

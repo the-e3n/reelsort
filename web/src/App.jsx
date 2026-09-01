@@ -50,7 +50,7 @@ function getUrlState() {
   };
 }
 
-function ConversionView({ branding, convertFolders, convertFolder, onConvertFolderChange, onConvertStart, onConvertStop, convertProgress, convertStatus, convertHistory, onRetry, settingsDraft, onChange, onSave }) {
+function ConversionView({ branding, convertFolders, convertFolder, onConvertFolderChange, onConvertStart, onConvertStop, convertProgress, convertStatus, convertHistory, onRetry, settingsDraft, onChange, onSave, convertJobOutputPath, onConvertJobOutputPathChange, onClearHistory, convertJobOutputMode, onConvertJobOutputModeChange }) {
   return (
     <section className="panel settings-panel">
       <header className="panel__header">
@@ -63,45 +63,17 @@ function ConversionView({ branding, convertFolders, convertFolder, onConvertFold
       <div className="settings-grid">
         <label>
           <span>Convert format</span>
-          <select value={settingsDraft?.converter?.format || 'mp3'} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), format: e.target.value })}>
+          <select value={settingsDraft?.converter?.format ?? ''} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), format: e.target.value })}>
+            <option value="">(not set)</option>
             <option value="mp3">MP3</option>
             <option value="m4a">M4A</option>
           </select>
         </label>
         <label>
           <span>Quality / Bitrate</span>
-          <input value={settingsDraft?.converter?.quality || '192k'} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), quality: e.target.value })} />
+          <input value={settingsDraft?.converter?.quality ?? ''} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), quality: e.target.value })} />
         </label>
-        <label>
-          <span>Output location</span>
-          <select value={settingsDraft?.converter?.output || 'sidecar'} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), output: e.target.value })}>
-            <option value="sidecar">Same folder (sidecar)</option>
-            <option value="server">Server folder</option>
-          </select>
-        </label>
-        {settingsDraft?.converter?.output === 'server' && (
-          <label>
-            <span>Server output folder (relative)</span>
-            <input value={settingsDraft?.converter?.outputPath || ''} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), outputPath: e.target.value })} placeholder="server/data/audio" />
-          </label>
-        )}
-        {settingsDraft?.converter?.output === 'server' && (
-          <div className="panel__notice" style={{ marginTop: 6 }}>
-            <small>
-              Resolved output path: {' '}
-              {(() => {
-                const mp = String(settingsDraft?.mediaPath || '').trim();
-                const op = String(settingsDraft?.converter?.outputPath || '').trim();
-                if (!mp) return 'Set "Media folder path on server" to compute resolved path.';
-                if (!op) return mp;
-                if (op.startsWith('/')) return op; // absolute
-                const left = mp.replace(/\/+$/,'');
-                const right = op.replace(/^\/+/, '');
-                return `${left}/${right}`;
-              })()}
-            </small>
-          </div>
-        )}
+            {/* Output location moved to per-job controls */}
         <label className="label--inline">
           <input type="checkbox" checked={Boolean(settingsDraft?.converter?.hwAccel)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), hwAccel: e.target.checked })} />
           <span>Use hardware acceleration</span>
@@ -116,11 +88,11 @@ function ConversionView({ branding, convertFolders, convertFolder, onConvertFold
         </label>
         <label>
           <span>Concurrency</span>
-          <input type="number" min={1} value={Number(settingsDraft?.converter?.concurrency || 1)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), concurrency: Number(e.target.value) || 1 })} />
+          <input type="number" min={1} value={settingsDraft?.converter?.concurrency ?? ''} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), concurrency: e.target.value === '' ? '' : Number(e.target.value) })} />
         </label>
         <label>
           <span>Retries</span>
-          <input type="number" min={0} value={Number(settingsDraft?.converter?.retryCount || 1)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), retryCount: Number(e.target.value) || 0 })} />
+          <input type="number" min={0} value={settingsDraft?.converter?.retryCount ?? ''} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), retryCount: e.target.value === '' ? '' : Number(e.target.value) })} />
         </label>
       </div>
 
@@ -138,6 +110,35 @@ function ConversionView({ branding, convertFolders, convertFolder, onConvertFold
             ))}
           </select>
         </label>
+        <label>
+          <span>Job output location</span>
+          <select value={convertJobOutputMode ?? ''} onChange={(e) => onConvertJobOutputModeChange(e.target.value)}>
+            <option value="">(use default)</option>
+            <option value="sidecar">Same folder (sidecar)</option>
+            <option value="server">Server folder</option>
+          </select>
+        </label>
+        <label>
+          <span>Job output folder (optional)</span>
+          <input value={convertJobOutputPath || ''} onChange={(e) => onConvertJobOutputPathChange(e.target.value)} placeholder="audio/hindi or /absolute/path" />
+        </label>
+        {convertJobOutputMode === 'server' && (
+          <div className="panel__notice" style={{ marginTop: 6 }}>
+            <small>
+              Resolved output path: {' '}
+              {(() => {
+                const mp = String(settingsDraft?.mediaPath || '').trim();
+                const op = String(convertJobOutputPath || '').trim() || String(settingsDraft?.converter?.outputPath || '').trim();
+                if (!mp) return 'Set "Media folder path on server" to compute resolved path.';
+                if (!op) return mp;
+                if (op.startsWith('/')) return op; // absolute
+                const left = mp.replace(/\/+$/,'');
+                const right = op.replace(/^\/+/, '');
+                return `${left}/${right}`;
+              })()}
+            </small>
+          </div>
+        )}
       </div>
 
       <div className="settings-actions">
@@ -157,10 +158,16 @@ function ConversionView({ branding, convertFolders, convertFolder, onConvertFold
           <div className="panel__notice">{convertStatus}</div>
           <div>
             {Object.entries(convertProgress.perFile || {}).map(([id, info]) => (
-              <div key={id} style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-                <div>{info.status} {Math.round(info.percent || 0)}% {info.seconds ? `(${Math.round(info.seconds)}s)` : ''}</div>
+              <div key={id} style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ fontWeight: 600 }}>{info.output ? info.output.split('/').pop() : `Job ${id}`}</div>
+                  <div style={{ opacity: 0.8 }}>{info.status} {info.seconds ? `(${Math.round(info.seconds)}s)` : ''}</div>
+                </div>
+                <div className="scan-progress__track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(info.percent || 0)}>
+                  <div className="scan-progress__fill" style={{ width: `${Math.round(info.percent || 0)}%` }} />
+                </div>
                 {info.status === 'error' && (
-                  <div>
+                  <div style={{ marginTop: 6 }}>
                     <button type="button" onClick={() => onRetry(Number(id))}>Retry</button>
                   </div>
                 )}
@@ -173,10 +180,15 @@ function ConversionView({ branding, convertFolders, convertFolder, onConvertFold
       <hr />
 
       <header className="panel__header">
-        <div>
-          <span className="eyebrow">History</span>
-          <h2>Recent conversions</h2>
-        </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <span className="eyebrow">History</span>
+                <h2>Recent conversions</h2>
+              </div>
+              <div>
+                <button type="button" className="ghost-button" onClick={() => onClearHistory && onClearHistory()}>Clear history</button>
+              </div>
+            </div>
       </header>
 
       <div className="panel__notice">
@@ -1109,6 +1121,8 @@ export default function App() {
   const [scanProgress, setScanProgress] = useState({ running: false, added: 0, total: 0 });
   const [convertFolders, setConvertFolders] = useState([]);
   const [convertFolder, setConvertFolder] = useState('all');
+  const [convertJobOutputPath, setConvertJobOutputPath] = useState('');
+  const [convertJobOutputMode, setConvertJobOutputMode] = useState('');
   const [convertProgress, setConvertProgress] = useState({ running: false, total: 0, processed: 0, perFile: {}, current: null });
   const [convertStatus, setConvertStatus] = useState('');
   const [convertHistory, setConvertHistory] = useState([]);
@@ -1388,7 +1402,15 @@ export default function App() {
     try {
       setConvertStatus('Starting conversion…');
       setConvertProgress((c) => ({ ...c, running: true }));
-      await api.startConvert({ folder: convertFolder });
+      // pass job-specific outputPath/output when provided (per-job overrides settings)
+      const convOpts = { folder: convertFolder };
+      if (convertJobOutputPath && String(convertJobOutputPath).trim() !== '') convOpts.outputPath = String(convertJobOutputPath).trim();
+      if (convertJobOutputMode && String(convertJobOutputMode).trim() !== '') {
+        convOpts.output = String(convertJobOutputMode).trim();
+      } else if (settingsDraft?.converter?.output) {
+        convOpts.output = settingsDraft.converter.output;
+      }
+      await api.startConvert(convOpts);
 
       while (true) {
         const progress = await api.getConvertProgress();
@@ -1415,6 +1437,16 @@ export default function App() {
     }
   }
 
+  async function handleClearConvertHistory() {
+    try {
+      await api.clearConvertHistory();
+      await loadConvertHistory();
+      setFlash('Conversion history cleared.');
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
   async function loadConvertHistory() {
     try {
       const resp = await api.getConvertHistory();
@@ -1438,7 +1470,11 @@ export default function App() {
   async function handleRetryConvert(videoId) {
     try {
       setConvertStatus(`Retrying ${videoId}…`);
-      await api.startConvert({ videoIds: [videoId] });
+      const retryOpts = { videoIds: [videoId] };
+      if (convertJobOutputPath && String(convertJobOutputPath).trim() !== '') retryOpts.outputPath = String(convertJobOutputPath).trim();
+      if (convertJobOutputMode && String(convertJobOutputMode).trim() !== '') retryOpts.output = String(convertJobOutputMode).trim();
+      else if (settingsDraft?.converter?.output) retryOpts.output = settingsDraft.converter.output;
+      await api.startConvert(retryOpts);
       // poll once
       await new Promise((r) => setTimeout(r, 500));
       await loadConvertHistory();
@@ -1704,6 +1740,11 @@ export default function App() {
             settingsDraft={settingsDraft}
             onChange={(key, value) => setSettingsDraft((current) => ({ ...current, [key]: value }))}
             onSave={handleSaveSettings}
+            convertJobOutputPath={convertJobOutputPath}
+            onConvertJobOutputPathChange={(v) => setConvertJobOutputPath(v)}
+            onClearHistory={handleClearConvertHistory}
+            convertJobOutputMode={convertJobOutputMode}
+            onConvertJobOutputModeChange={(v) => setConvertJobOutputMode(v)}
           />
         )}
       </main>
