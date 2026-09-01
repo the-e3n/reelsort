@@ -104,7 +104,7 @@ function spawnFfmpegWithProgress(inputPath, coverPath, outputPath, durationSec, 
 
     // encoding: select codec and quality based on options
     if (options.copy) {
-      // copy audio stream
+      // copy audio stream / remux
       args.push('-c:a', 'copy');
     } else if (options.format === 'm4a' || outputPath.toLowerCase().endsWith('.m4a')) {
       // AAC
@@ -128,6 +128,20 @@ function spawnFfmpegWithProgress(inputPath, coverPath, outputPath, durationSec, 
 
     if (coverPath) {
       args.push('-metadata:s:v', 'title=Album cover', '-metadata:s:v', 'comment=Cover (front)');
+    }
+
+    // metadata fields
+    if (options.metadata && typeof options.metadata === 'object') {
+      for (const [k, v] of Object.entries(options.metadata)) {
+        if (v != null && String(v).length) {
+          args.push('-metadata', `${k}=${String(v)}`);
+        }
+      }
+    }
+
+    // avoid writing ID3v1 tags which may truncate fields; prefer ID3v2
+    if (!options.copy && options.format === 'mp3') {
+      args.push('-write_id3v1', '0');
     }
 
     args.push(outputPath);
@@ -189,6 +203,18 @@ function sanitizeFileNameForJellyfin(name) {
   // Limit length to a reasonable filename length
   if (s.length > 200) s = s.slice(0, 200);
   if (!s) return 'untitled';
+  return s;
+}
+
+function sanitizeMetadataField(value) {
+  if (value == null) return '';
+  let s = String(value);
+  // strip problematic characters
+  s = s.replace(/[<>:\"\/\\|\?\*\x00-\x1F]/g, '');
+  // collapse whitespace
+  s = s.replace(/\s+/g, ' ').trim();
+  // limit length to avoid ID3v1 truncation issues; use 30 bytes conservative limit
+  if (s.length > 120) s = s.slice(0, 120);
   return s;
 }
 
@@ -279,7 +305,7 @@ export async function startConversion(opts) {
             detectedCodec = await ffprobeAudioCodec(inputPath).catch(() => null);
             if (detectedCodec) {
               const target = (conv.format === 'm4a') ? 'aac' : 'mp3';
-              if (detectedCodec.toLowerCase().includes(target)) {
+              if (detectedCodec.toLowerCase().includes(target) && Boolean(conv.preferRemux)) {
                 shouldCopy = true;
               }
             }
@@ -297,7 +323,11 @@ export async function startConversion(opts) {
             }
           }
 
+          const sanitizedTitle = sanitizeMetadataField(video.baseName);
           const opts = { hwAccel: Boolean(conv.hwAccel), format: conv.format, quality: conv.quality, copy: shouldCopy };
+          if (!shouldCopy) {
+            opts.metadata = { title: sanitizedTitle };
+          }
 
           // build safe output path now that outExt is known; avoid overwriting existing files
           let candidateBase = `${sanitizedBase}${outExt}`;

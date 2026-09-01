@@ -110,6 +110,10 @@ function ConversionView({ branding, convertFolders, convertFolder, onConvertFold
           <input type="checkbox" checked={Boolean(settingsDraft?.converter?.copyIfPossible)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), copyIfPossible: e.target.checked })} />
           <span>Copy audio if possible</span>
         </label>
+        <label className="label--inline">
+          <input type="checkbox" checked={Boolean(settingsDraft?.converter?.preferRemux)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), preferRemux: e.target.checked })} />
+          <span>Prefer remuxing (keep original stream) when possible</span>
+        </label>
         <label>
           <span>Concurrency</span>
           <input type="number" min={1} value={Number(settingsDraft?.converter?.concurrency || 1)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), concurrency: Number(e.target.value) || 1 })} />

@@ -22,6 +22,7 @@ const defaults = {
     quality: '192k',
     output: 'sidecar',
     outputPath: 'server/data/audio',
+    preferRemux: true,
     hwAccel: false,
     concurrency: 1,
     copyIfPossible: true,
