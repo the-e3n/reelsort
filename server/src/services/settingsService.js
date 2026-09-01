@@ -9,6 +9,7 @@ const defaults = {
     keep: 'k',
     trash: 'p',
     moveCurrent: 'm',
+    moveKeep: 'M',
     playPause: 's',
     seekBack: 'a',
     seekForward: 'd',

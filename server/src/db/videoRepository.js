@@ -72,6 +72,7 @@ const updateLocationStmt = db.prepare(
    WHERE id = @id`
 );
 const findByIdStmt = db.prepare('SELECT * FROM videos WHERE id = ?');
+const findByRelativePathStmt = db.prepare('SELECT * FROM videos WHERE relative_path = ?');
 const findManyByDecisionStmt = db.prepare(
   'SELECT * FROM videos WHERE decision = ? ORDER BY base_name COLLATE NOCASE ASC'
 );
@@ -277,6 +278,22 @@ export function updateVideoLocation({
   });
 
   return getVideoById(id);
+}
+
+export function upsertVideo(video) {
+  upsertStmt.run({
+    relativePath: video.relativePath,
+    filename: video.filename,
+    baseName: video.baseName,
+    subdirectory: video.subdirectory || null,
+    posterRelativePath: video.posterRelativePath || null,
+    extension: video.extension,
+    sizeBytes: video.sizeBytes,
+    mtimeMs: video.mtimeMs,
+  });
+
+  const row = findByRelativePathStmt.get(video.relativePath);
+  return row ? mapVideo(row) : null;
 }
 
 export function getTrashVideos() {

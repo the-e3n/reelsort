@@ -217,11 +217,18 @@ export async function startConversion(opts) {
       const conv = settingsNow.converter || {};
       const concurrency = Math.max(1, Number(conv.concurrency) || 1);
 
-      // ensure server output dir if needed (support custom relative outputPath)
+      // ensure server output dir if needed (support custom outputPath)
+      // If `conv.outputPath` is relative, resolve it relative to the configured `mediaPath`
+      // so outputs land under the media root instead of the project root.
       let serverBaseDir = path.resolve(process.cwd(), 'server', 'data', 'audio');
       if (conv.outputPath && typeof conv.outputPath === 'string' && conv.outputPath.trim() !== '') {
-        // allow relative paths from project root
-        serverBaseDir = path.resolve(process.cwd(), conv.outputPath);
+        const candidate = conv.outputPath.trim();
+        if (path.isAbsolute(candidate)) {
+          serverBaseDir = path.resolve(candidate);
+        } else {
+          // prefer resolving relative to mediaPath so output is colocated with media
+          serverBaseDir = path.resolve(mediaPath, candidate);
+        }
       }
       if (conv.output === 'server') {
         await fs.mkdir(serverBaseDir, { recursive: true });

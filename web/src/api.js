@@ -59,11 +59,11 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify({ decision }),
     }),
-  moveVideo: (id, targetFolder) =>
+  moveVideo: (id, targetFolder, keep = false) =>
     request(`/api/videos/${id}/move`, {
       method: 'POST',
       headers: jsonHeaders,
-      body: JSON.stringify({ targetFolder }),
+      body: JSON.stringify({ targetFolder, keep }),
     }),
   savePlayback: (id, positionSeconds) =>
     request(`/api/videos/${id}/playback`, {

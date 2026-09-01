@@ -17,6 +17,7 @@ const DEFAULT_SHORTCUTS = {
   keep: 'k',
   trash: 'p',
   moveCurrent: 'm',
+  moveKeep: 'M',
   playPause: 's',
   seekBack: 'a',
   seekForward: 'd',
@@ -81,8 +82,25 @@ function ConversionView({ branding, convertFolders, convertFolder, onConvertFold
         {settingsDraft?.converter?.output === 'server' && (
           <label>
             <span>Server output folder (relative)</span>
-            <input value={settingsDraft?.converter?.outputPath || 'server/data/audio'} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), outputPath: e.target.value })} placeholder="server/data/audio" />
+            <input value={settingsDraft?.converter?.outputPath || ''} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), outputPath: e.target.value })} placeholder="server/data/audio" />
           </label>
+        )}
+        {settingsDraft?.converter?.output === 'server' && (
+          <div className="panel__notice" style={{ marginTop: 6 }}>
+            <small>
+              Resolved output path: {' '}
+              {(() => {
+                const mp = String(settingsDraft?.mediaPath || '').trim();
+                const op = String(settingsDraft?.converter?.outputPath || '').trim();
+                if (!mp) return 'Set "Media folder path on server" to compute resolved path.';
+                if (!op) return mp;
+                if (op.startsWith('/')) return op; // absolute
+                const left = mp.replace(/\/+$/,'');
+                const right = op.replace(/^\/+/, '');
+                return `${left}/${right}`;
+              })()}
+            </small>
+          </div>
         )}
         <label className="label--inline">
           <input type="checkbox" checked={Boolean(settingsDraft?.converter?.hwAccel)} onChange={(e) => onChange('converter', { ...(settingsDraft.converter || {}), hwAccel: e.target.checked })} />
@@ -501,6 +519,7 @@ function FilterView({
   onSelect,
   onDecision,
   onMoveCurrent,
+  onCopyCurrent,
   scope,
   onScopeChange,
   folder,
@@ -510,6 +529,7 @@ function FilterView({
   skipSeconds,
   shortcuts,
   onMoveToCustomFolder,
+  onCopyToCustomFolder,
   onRefresh,
 }) {
   const videoRef = useRef(null);
@@ -617,6 +637,11 @@ function FilterView({
       if (key === normalizeShortcut(shortcuts.moveCurrent) && current && moveTargetFolder !== currentFolderTag) {
         event.preventDefault();
         await onMoveCurrent(current.id, moveTargetFolder);
+      }
+
+      if (key === normalizeShortcut(shortcuts.moveKeep) && current && moveTargetFolder !== currentFolderTag) {
+        event.preventDefault();
+        if (onCopyCurrent) await onCopyCurrent(current.id, moveTargetFolder);
       }
 
       for (const [targetFolder, shortcutKey] of folderMoveShortcutEntries) {
@@ -729,6 +754,13 @@ function FilterView({
             disabled={!current || moveTargetFolder === currentFolderTag}
             onClick={() => current && onMoveCurrent(current.id, moveTargetFolder)}
           />
+          <ActionButton
+            icon="📄"
+            label="Move and keep"
+            className="ghost-button"
+            disabled={!current || moveTargetFolder === currentFolderTag}
+            onClick={() => current && onCopyCurrent && onCopyCurrent(current.id, moveTargetFolder)}
+          />
           <input
             value={customFolderName}
             onChange={(event) => setCustomFolderName(event.target.value)}
@@ -804,7 +836,15 @@ function FilterView({
               shortcut={formatShortcutLabel(shortcuts.moveCurrent)}
               className="ghost-button"
               disabled={moveTargetFolder === currentFolderTag}
-              onClick={() => onMoveCurrent(current.id, moveTargetFolder)}
+                onClick={() => onMoveCurrent(current.id, moveTargetFolder)}
+            />
+            <ActionButton
+              icon="📄"
+              label="Move and keep to selected folder"
+              shortcut={formatShortcutLabel(shortcuts.moveKeep)}
+              className="ghost-button"
+              disabled={moveTargetFolder === currentFolderTag}
+              onClick={() => onCopyCurrent && onCopyCurrent(current.id, moveTargetFolder)}
             />
             <ActionButton icon="⏪" label={`-${skipSeconds}s`} shortcut={formatShortcutLabel(shortcuts.seekBack)} onClick={() => videoRef.current && (videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - skipSeconds))} />
             <ActionButton icon="⏩" label={`+${skipSeconds}s`} shortcut={formatShortcutLabel(shortcuts.seekForward)} onClick={() => videoRef.current && (videoRef.current.currentTime += skipSeconds)} />
@@ -933,6 +973,10 @@ function SettingsView({ branding, settingsDraft, onChange, onShortcutChange, onS
         <label>
           <span>Shortcut: Move current video</span>
           <input value={settingsDraft.shortcuts.moveCurrent} onChange={(event) => onShortcutChange('moveCurrent', event.target.value)} placeholder="m" />
+        </label>
+        <label>
+          <span>Shortcut: Move and keep</span>
+          <input value={settingsDraft.shortcuts.moveKeep} onChange={(event) => onShortcutChange('moveKeep', event.target.value)} placeholder="M" />
         </label>
         <label>
           <span>Shortcut: Play/Pause</span>
@@ -1444,6 +1488,21 @@ export default function App() {
     }
   }
 
+  async function handleCopyCurrentVideo(id, targetFolder) {
+    try {
+      await api.moveVideo(id, targetFolder, true);
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, queueFolder, id),
+        loadTrash(),
+      ]);
+      setFlash('Video copied.');
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
   async function handleMoveCurrentVideoToCustomFolder(id, customFolderName) {
     try {
       await api.moveVideo(id, customFolderName);
@@ -1454,6 +1513,21 @@ export default function App() {
         loadTrash(),
       ]);
       setFlash(`Video moved to ${customFolderName}.`);
+    } catch (error) {
+      setFlash(error.message);
+    }
+  }
+
+  async function handleCopyCurrentVideoToCustomFolder(id, customFolderName) {
+    try {
+      await api.moveVideo(id, customFolderName, true);
+      await Promise.all([
+        refreshStats(),
+        loadVideos({ reset: true }),
+        loadQueue(queueScope, queueFolder, id),
+        loadTrash(),
+      ]);
+      setFlash(`Video copied to ${customFolderName}.`);
     } catch (error) {
       setFlash(error.message);
     }
@@ -1542,7 +1616,8 @@ export default function App() {
             currentId={currentFilterId}
             onSelect={setCurrentFilterId}
             onDecision={handleDecision}
-            onMoveCurrent={handleMoveCurrentVideo}
+              onMoveCurrent={handleMoveCurrentVideo}
+              onCopyCurrent={handleCopyCurrentVideo}
             scope={queueScope}
             onScopeChange={(value) => {
               setQueueScope(value);
@@ -1558,6 +1633,7 @@ export default function App() {
             skipSeconds={Number(settings.skipSeconds) || 10}
             shortcuts={settings.shortcuts || DEFAULT_SHORTCUTS}
             onMoveToCustomFolder={handleMoveCurrentVideoToCustomFolder}
+            onCopyToCustomFolder={handleCopyCurrentVideoToCustomFolder}
             onRefresh={() => loadQueue(queueScope, queueFolder, currentFilterId)}
           />
         )}

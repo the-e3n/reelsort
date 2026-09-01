@@ -195,16 +195,56 @@ router.get('/filter/queue', (req, res) => {
   const queue = getFilterQueue(scope, folder).map(serializeVideo);
   const folderCounts = getFilterQueueFolderCounts(scope);
   const folders = folderCounts.map((item) => item.tag);
-  const allFolders = getQueueFolderTags();
-  res.json({ items: queue, scope, folder, folders, folderCounts, allFolders });
+  const allFoldersFromDb = getQueueFolderTags();
+  // try to include empty folders from the filesystem as well
+  const { mediaPath } = getSettings();
+
+  async function listFoldersOnDisk(rootPath) {
+    if (!rootPath) return [];
+    try {
+      const results = [];
+      async function walk(dir, relative) {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        let hasSubdir = false;
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            hasSubdir = true;
+            const childRel = relative ? path.posix.join(relative, entry.name) : entry.name;
+            results.push(childRel);
+            await walk(path.resolve(dir, entry.name), childRel);
+          }
+        }
+      }
+
+      await walk(mediaPath, '');
+      // include root as special tag
+      return ['__root__', ...results.map((r) => r)];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  (async () => {
+    const fsFolders = await listFoldersOnDisk(mediaPath);
+    const set = new Set([...(allFoldersFromDb || []), ...(fsFolders || [])]);
+    const allFolders = Array.from(set.values());
+    res.json({ items: queue, scope, folder, folders, folderCounts, allFolders });
+  })();
 });
 
 router.post('/videos/:id/move', async (req, res, next) => {
   try {
     const id = Number.parseInt(req.params.id, 10);
     const targetFolder = typeof req.body?.targetFolder === 'string' ? req.body.targetFolder : '__root__';
+    const keep = Boolean(req.body?.keep);
     const moved = await moveVideoToFolder(id, targetFolder);
-    res.json(serializeVideo(moved));
+    if (keep) {
+      // mark the moved video as kept in the DB
+      const video = keepVideo(id);
+      res.json(serializeVideo(video));
+    } else {
+      res.json(serializeVideo(moved));
+    }
   } catch (error) {
     next(error);
   }

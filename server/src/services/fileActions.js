@@ -7,6 +7,7 @@ import {
   removeVideo,
   setDecision,
   updateVideoLocation,
+  upsertVideo,
 } from '../db/videoRepository.js';
 import { getSettings } from './settingsService.js';
 
@@ -147,4 +148,79 @@ export async function moveVideoToFolder(id, targetFolder) {
     sizeBytes: stats.size,
     mtimeMs: stats.mtimeMs,
   });
+}
+
+export async function copyVideoToFolder(id, targetFolder) {
+  const video = getVideoById(id);
+  if (!video) {
+    throw new Error('Video not found.');
+  }
+
+  const { mediaPath } = getSettings();
+  if (!mediaPath) {
+    throw new Error('No media path configured.');
+  }
+
+  const targetSubdirectory = normalizeTargetSubdirectory(targetFolder);
+  const nextRelativePath = targetSubdirectory
+    ? path.posix.join(targetSubdirectory, video.filename)
+    : video.filename;
+
+  if (nextRelativePath === video.relativePath) {
+    // copying to same path is a no-op
+    return video;
+  }
+
+  const sourceAbsolutePath = getAbsoluteMediaPath(video.relativePath);
+  const destinationAbsolutePath = getAbsoluteMediaPath(nextRelativePath);
+  await fs.mkdir(path.dirname(destinationAbsolutePath), { recursive: true });
+
+  try {
+    // ensure we don't overwrite existing target
+    await fs.stat(destinationAbsolutePath);
+    throw new Error(`Target file already exists in ${targetSubdirectory || 'root'} folder.`);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') {
+      throw err;
+    }
+  }
+
+  await fs.copyFile(sourceAbsolutePath, destinationAbsolutePath);
+
+  let nextPosterRelativePath = video.posterRelativePath || null;
+  if (video.posterRelativePath) {
+    const posterFilename = path.posix.basename(video.posterRelativePath);
+    nextPosterRelativePath = targetSubdirectory
+      ? path.posix.join(targetSubdirectory, posterFilename)
+      : posterFilename;
+
+    if (nextPosterRelativePath !== video.posterRelativePath) {
+      const sourcePosterAbsolutePath = getAbsoluteMediaPath(video.posterRelativePath);
+      const destinationPosterAbsolutePath = getAbsoluteMediaPath(nextPosterRelativePath);
+      await fs.mkdir(path.dirname(destinationPosterAbsolutePath), { recursive: true });
+
+      try {
+        await fs.copyFile(sourcePosterAbsolutePath, destinationPosterAbsolutePath);
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          throw error;
+        }
+      }
+    }
+  }
+
+  const stats = await fs.stat(destinationAbsolutePath);
+
+  const newVideo = upsertVideo({
+    relativePath: nextRelativePath,
+    filename: path.posix.basename(nextRelativePath),
+    baseName: video.baseName,
+    subdirectory: targetSubdirectory,
+    posterRelativePath: nextPosterRelativePath,
+    extension: video.extension,
+    sizeBytes: stats.size,
+    mtimeMs: stats.mtimeMs,
+  });
+
+  return newVideo;
 }

@@ -330,7 +330,7 @@ select {
 .settings-actions,
 .decision-bar {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   justify-content: flex-end;
 }
 
@@ -358,7 +358,7 @@ select {
 }
 
 .toolbar input {
-  min-width: 240px;
+  min-width: 160px;
 }
 
 .toolbar button {
