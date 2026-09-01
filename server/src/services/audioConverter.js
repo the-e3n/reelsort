@@ -178,6 +178,20 @@ function spawnFfmpegWithProgress(inputPath, coverPath, outputPath, durationSec, 
   });
 }
 
+function sanitizeFileNameForJellyfin(name) {
+  if (!name || typeof name !== 'string') return 'untitled';
+  // Remove characters known to cause issues in Jellyfin: < > : " / \ | ? * and control chars
+  let s = name.replace(/[<>:\"\/\\|\?\*\x00-\x1F]/g, '');
+  // Collapse whitespace and trim
+  s = s.replace(/\s+/g, ' ').trim();
+  // Replace leading/trailing dots or spaces (problematic on some filesystems)
+  s = s.replace(/^\.+|\.+$/g, '').replace(/^\s+|\s+$/g, '');
+  // Limit length to a reasonable filename length
+  if (s.length > 200) s = s.slice(0, 200);
+  if (!s) return 'untitled';
+  return s;
+}
+
 export async function startConversion(opts) {
   if (state.running) {
     throw new Error('Conversion already running.');
@@ -252,9 +266,7 @@ export async function startConversion(opts) {
             outputDir = serverBaseDir;
           }
 
-          const outExt = (conv.format === 'm4a') ? '.m4a' : '.mp3';
-          const outBase = `${video.baseName}${outExt}`;
-          const safeOut = path.join(outputDir, outBase);
+          const sanitizedBase = sanitizeFileNameForJellyfin(video.baseName);
 
           const coverPath = posterPath ? await fs.stat(posterPath).then(() => posterPath).catch(() => null) : null;
 
@@ -262,17 +274,49 @@ export async function startConversion(opts) {
 
           // determine if copy is possible and desired
           let shouldCopy = false;
+          let detectedCodec = null;
           if (conv.copyIfPossible) {
-            const codec = await ffprobeAudioCodec(inputPath).catch(() => null);
-            if (codec) {
+            detectedCodec = await ffprobeAudioCodec(inputPath).catch(() => null);
+            if (detectedCodec) {
               const target = (conv.format === 'm4a') ? 'aac' : 'mp3';
-              if (codec.toLowerCase().includes(target)) {
+              if (detectedCodec.toLowerCase().includes(target)) {
                 shouldCopy = true;
               }
             }
           }
 
+          // Decide output container extension. If we're copying/remuxing, prefer containers
+          // that Jellyfin recognizes for the source container: MP4->.m4a, MKV/WebM/WEBA->.mka
+          const inputExt = path.extname(inputPath).toLowerCase();
+          let outExt = (conv.format === 'm4a') ? '.m4a' : '.mp3';
+          if (shouldCopy) {
+            if (inputExt === '.mp4') {
+              outExt = '.m4a';
+            } else if (['.mkv', '.webm', '.weba'].includes(inputExt)) {
+              outExt = '.mka';
+            }
+          }
+
           const opts = { hwAccel: Boolean(conv.hwAccel), format: conv.format, quality: conv.quality, copy: shouldCopy };
+
+          // build safe output path now that outExt is known; avoid overwriting existing files
+          let candidateBase = `${sanitizedBase}${outExt}`;
+          let safeOut = path.join(outputDir, candidateBase);
+          let suffix = 1;
+          // eslint-disable-next-line no-await-in-loop
+          while (true) {
+            try {
+              await fs.stat(safeOut);
+              candidateBase = `${sanitizedBase}-${suffix}${outExt}`;
+              safeOut = path.join(outputDir, candidateBase);
+              suffix += 1;
+            } catch (e) {
+              if (e && e.code === 'ENOENT') {
+                break;
+              }
+              throw e;
+            }
+          }
 
           let attempt = 0;
           const maxAttempts = Math.max(1, Number(conv.retryCount) || 1);
