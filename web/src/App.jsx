@@ -51,6 +51,20 @@ function getUrlState() {
 }
 
 function ConversionView({ branding, convertFolders, convertFolder, onConvertFolderChange, onConvertStart, onConvertStop, convertProgress, convertStatus, convertHistory, onRetry, settingsDraft, onChange, onSave, convertJobOutputPath, onConvertJobOutputPathChange, onClearHistory, convertJobOutputMode, onConvertJobOutputModeChange }) {
+  const [showDoneList, setShowDoneList] = useState(false);
+
+  // split per-file progress into running vs done (collapsed by default)
+  const perFileEntries = Object.entries(convertProgress.perFile || {});
+  const doneKeys = new Set();
+  perFileEntries.forEach(([id, info]) => {
+    const status = String(info.status || '').toLowerCase();
+    if (status === 'done' || status === 'completed' || status === 'finished' || status === 'error' || Number(info.percent || 0) >= 100) {
+      doneKeys.add(id);
+    }
+  });
+  const runningEntries = perFileEntries.filter(([id]) => !doneKeys.has(id));
+  const doneEntries = perFileEntries.filter(([id]) => doneKeys.has(id));
+
   return (
     <section className="panel settings-panel">
       <header className="panel__header">
@@ -157,22 +171,52 @@ function ConversionView({ branding, convertFolders, convertFolder, onConvertFold
           </div>
           <div className="panel__notice">{convertStatus}</div>
           <div>
-            {Object.entries(convertProgress.perFile || {}).map(([id, info]) => (
-              <div key={id} style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <div style={{ fontWeight: 600 }}>{info.output ? info.output.split('/').pop() : `Job ${id}`}</div>
-                  <div style={{ opacity: 0.8 }}>{info.status} {info.seconds ? `(${Math.round(info.seconds)}s)` : ''}</div>
-                </div>
-                <div className="scan-progress__track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(info.percent || 0)}>
-                  <div className="scan-progress__fill" style={{ width: `${Math.round(info.percent || 0)}%` }} />
-                </div>
-                {info.status === 'error' && (
-                  <div style={{ marginTop: 6 }}>
-                    <button type="button" onClick={() => onRetry(Number(id))}>Retry</button>
+            {runningEntries.length > 0 ? (
+              runningEntries.map(([id, info]) => (
+                <div key={id} style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600 }}>{info.output ? info.output.split('/').pop() : `Job ${id}`}</div>
+                    <div style={{ opacity: 0.8 }}>{info.status} {info.seconds ? `(${Math.round(info.seconds)}s)` : ''}</div>
                   </div>
-                )}
-              </div>
-            ))}
+                  <div className="scan-progress__track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(info.percent || 0)}>
+                    <div className="scan-progress__fill" style={{ width: `${Math.round(info.percent || 0)}%` }} />
+                  </div>
+                  {info.status === 'error' && (
+                    <div style={{ marginTop: 6 }}>
+                      <button type="button" onClick={() => onRetry(Number(id))}>Retry</button>
+                    </div>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div style={{ fontStyle: 'italic', opacity: 0.8 }}>No running conversions</div>
+            )}
+
+            {/* Collapsible done list */}
+            <div style={{ marginTop: 12 }}>
+              <button type="button" className="ghost-button" onClick={() => setShowDoneList((s) => !s)}>{showDoneList ? 'Hide' : 'Show'} completed conversions ({doneEntries.length})</button>
+              {showDoneList && (
+                <div style={{ marginTop: 8 }}>
+                  {doneEntries.length === 0 ? (
+                    <div style={{ fontStyle: 'italic', opacity: 0.8 }}>No completed conversions</div>
+                  ) : (
+                    doneEntries.map(([id, info]) => (
+                      <div key={`done-${id}`} style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <div style={{ fontWeight: 600 }}>{info.output ? info.output.split('/').pop() : `Job ${id}`}</div>
+                          <div style={{ opacity: 0.8, fontSize: 12 }}>{info.status}{info.error ? ` — ${info.error}` : ''}</div>
+                        </div>
+                        <div>
+                          {info.status === 'error' ? (
+                            <button type="button" onClick={() => onRetry(Number(id))}>Retry</button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
